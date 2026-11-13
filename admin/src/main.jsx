@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams, Navigate } from 'react-router-dom'
 import {
-  ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Baby, BadgeCheck, Check, ChevronDown, ChevronRight,
+  AlertCircle, ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Baby, BadgeCheck, Check, ChevronDown, ChevronRight,
   CircleUserRound, ClipboardList, Clock3, CreditCard, Eye, Facebook, Heart, House, Instagram, LayoutDashboard,
   LockKeyhole, LogOut, Mail, MapPin, Menu, Minus, PackageCheck, Pencil, Phone, Plus, Search, Send, ShieldCheck, Shirt,
   ShoppingBag, SlidersHorizontal, Sparkles, Star, Trash2, Truck, UserRound, Users, X,
@@ -167,21 +167,28 @@ function ProductCard({ product, large = false }) {
   const { wishlist, dispatch, notify } = useStore()
   const [sizeOpen, setSizeOpen] = useState(false)
   const [size, setSize] = useState('')
+  const [selectedColor, setSelectedColor] = useState(product.colors?.[0] || '')
   const saved = wishlist.includes(product.id)
   const add = async () => {
     if (!size) { notify('Choose a size to add this little favourite.'); return }
-    const saved = await dispatch({ type: 'add', item: { id: product.id, size, color: product.colors[0], quantity: 1 } })
+    const saved = await dispatch({ type: 'add', item: { id: product.id, size, color: selectedColor || product.colors[0], quantity: 1 } })
     if (saved) { notify(`${product.name} added to your bag`); setSizeOpen(false) }
   }
+  const currentColorEntry = product.colorImages?.find(
+    (ci) => ci.color?.toLowerCase()?.trim() === selectedColor?.toLowerCase()?.trim()
+  )
+  const cardImage = currentColorEntry?.images?.[0] || product.images?.[0] || '/assets/products/girl-01.jpg'
   return <article className={`product-card ${large ? 'product-card-large' : ''}`}>
     <div className="product-image-wrap">
-      <Link to={`/product/${product.id}`} className="product-photo"><img src={mediaUrl(product.images?.[0]) || '/assets/products/girl-01.jpg'} alt={`${product.name} kidswear`} loading="lazy" onError={(e) => { e.currentTarget.src = '/assets/shop-banner.jpg' }} /></Link>
+      <Link to={`/product/${product.id}`} className="product-photo"><img src={mediaUrl(cardImage)} alt={`${product.name} kidswear`} loading="lazy" onError={(e) => { e.currentTarget.src = '/assets/shop-banner.jpg' }} /></Link>
       <span className={`product-badge ${product.newArrival ? 'badge-pink' : ''}`}>{product.newArrival ? 'JUST IN' : product.discount + '% OFF'}</span>
       <button className={`heart-float ${saved ? 'is-saved' : ''}`} aria-label={saved ? `Remove ${product.name} from wishlist` : `Add ${product.name} to wishlist`} onClick={async () => { if (await dispatch({ type: 'toggleWish', id: product.id })) notify(saved ? 'Removed from your little favorites' : 'Saved to your little favorites') }}><Heart size={19} fill={saved ? 'currentColor' : 'none'} /></button>
       <button className="quick-add" onClick={() => setSizeOpen(!sizeOpen)}>{sizeOpen ? 'Choose a size' : <>Quick add <Plus size={15} /></>}</button>
-      {sizeOpen && <div className="size-popover"><div className="size-popover-title">Choose their size</div><div className="size-options">{product.sizes.map((option) => { const inStock = !product.variants?.length || (product.variants.find((variant) => variant.size === option && variant.color === product.colors[0])?.stock || 0) > 0; return <button key={option} disabled={!inStock} className={`${size === option ? 'size-selected' : ''} ${!inStock ? 'size-unavailable' : ''}`} onClick={() => setSize(option)}>{option}</button> })}</div><button className="popover-add" onClick={add}>Add to bag <ArrowRight size={14} /></button></div>}
+      {sizeOpen && <div className="size-popover"><div className="size-popover-title">Choose their size</div><div className="size-options">{product.sizes.map((option) => { const inStock = !product.variants?.length || (product.variants.find((variant) => variant.size === option && variant.color === (selectedColor || product.colors[0]))?.stock || 0) > 0; return <button key={option} disabled={!inStock} className={`${size === option ? 'size-selected' : ''} ${!inStock ? 'size-unavailable' : ''}`} onClick={() => setSize(option)}>{option}</button> })}</div><button className="popover-add" onClick={add}>Add to bag <ArrowRight size={14} /></button></div>}
     </div>
-    <div className="product-info"><div className="product-label">{product.category} · {product.subcategory}</div><Link to={`/product/${product.id}`} className="product-title">{product.name}</Link><div className="product-price"><b>{money(product.price)}</b><del>{money(product.originalPrice)}</del><span>{stars} <small>({product.reviews})</small></span></div></div>
+    <div className="product-info"><div className="product-label">{product.category} · {product.subcategory}</div><Link to={`/product/${product.id}`} className="product-title">{product.name}</Link>
+    {product.colors?.length > 1 && <div className="card-color-swatches">{product.colors.map((c) => <button key={c} type="button" className={`card-color-dot ${selectedColor === c ? 'is-active' : ''}`} style={{ backgroundColor: c.replace(/\s+/g, '').toLowerCase() }} title={c} aria-label={`View in ${c}`} onClick={(e) => { e.preventDefault(); setSelectedColor(c) }} />)}</div>}
+    <div className="product-price"><b>{money(product.price)}</b><del>{money(product.originalPrice)}</del><span>{stars} <small>({product.reviews})</small></span></div></div>
   </article>
 }
 
@@ -250,9 +257,11 @@ function ProductDetail() {
   const { id } = useParams(); const { products: catalog, dispatch, wishlist, notify } = useStore(); const product = catalog.find((p) => p.id === id)
   const navigate = useNavigate()
   const [size, setSize] = useState(''); const [color, setColor] = useState(product?.colors[0] || ''); const [quantity, setQuantity] = useState(1); const [open, setOpen] = useState('Product details'); const [error, setError] = useState(''); const [activeImageIndex, setActiveImageIndex] = useState(0)
-  useEffect(() => setActiveImageIndex(0), [id])
+  useEffect(() => setActiveImageIndex(0), [id, color])
   if (!product) return <NotFound />
-  const productImages = product.images?.length ? product.images : ['/assets/products/girl-01.jpg']
+  const currentColorEntry = product.colorImages?.find((ci) => ci.color?.toLowerCase()?.trim() === color?.toLowerCase()?.trim())
+  const colorSpecificImages = (currentColorEntry?.images || []).filter(Boolean)
+  const productImages = colorSpecificImages.length > 0 ? colorSpecificImages : (product.images?.length ? product.images : ['/assets/products/girl-01.jpg'])
   const activeImage = productImages[activeImageIndex] || productImages[0]
   const save = wishlist.includes(product.id)
   const selectedVariant = product.variants?.find((variant) => variant.size === size && variant.color === color)
@@ -261,9 +270,9 @@ function ProductDetail() {
   const sizeAvailable = (candidate) => !product.variants?.length || (product.variants.find((variant) => variant.size === candidate && variant.color === color)?.stock || 0) > 0
   const add = async () => { if (!size) { setError('Pick a size first so we can get the fit just right.'); return false }; if (selectedStock < quantity) { setError('That size and color is out of stock.'); return false }; setError(''); const saved=await dispatch({type:'add',item:{id:product.id,size,color,quantity}}); if(saved) notify(`${product.name} added to your bag`); return saved }
   return <main className="page-width detail-page"><Breadcrumbs items={[{label:'Shop',to:'/shop'},{label:product.name}]} /><div className="detail-grid"><div className="detail-gallery">
-      <div className="detail-main-image"><img src={mediaUrl(activeImage)} alt={product.name} onError={(event)=>{event.currentTarget.src='/assets/shop-banner.jpg'}} /><span className="product-badge badge-pink">{product.newArrival?'JUST IN':product.discount + '% OFF'}</span></div>
-      <div className="detail-thumbnails" role="group" aria-label={product.name + ' images'}>{productImages.map((image,index)=><button type="button" className={'detail-thumbnail ' + (index===activeImageIndex?'is-selected':'')} key={image + '-' + index} aria-label={'View image ' + (index + 1) + ' of ' + product.name} aria-pressed={index===activeImageIndex} onClick={()=>setActiveImageIndex(index)}><img src={mediaUrl(image)} alt="" loading="lazy" /></button>)}</div>
-      </div><div className="detail-info"><span className="eyebrow">{product.category} · {product.subcategory}</span><h1>{product.name}</h1><div className="detail-rating">{stars} <b>{product.rating}</b> <span>({product.reviews} happy reviews)</span></div><div className="detail-price"><b>{money(product.price)}</b><del>{money(product.originalPrice)}</del><span>{product.discount}% off</span></div><p className="detail-description">{product.description}</p><div className="choice-label">Color <b>{color}</b></div><div className="color-options">{product.colors.map((c)=><button disabled={!colorAvailable(c)} className={`color-dot ${color===c?'color-active':''} ${!colorAvailable(c)?'size-unavailable':''}`} style={{ backgroundColor: c.replace(/\s+/g, '').toLowerCase() }} key={c} aria-label={`Choose ${c}${colorAvailable(c)?'':' (out of stock)'}`} title={colorAvailable(c)?c:`${c} — out of stock`} onClick={()=>{setColor(c);if(size&&product.variants?.length&&!product.variants.some((variant)=>variant.size===size&&variant.color===c&&variant.stock>0))setSize('')}} />)}</div><div className="choice-label size-label">Choose size <Link to="/size-guide">Size guide <ArrowUpRight size={13} /></Link></div><div className="detail-sizes">{product.sizes.map((s)=><button key={s} disabled={!sizeAvailable(s)} className={`${size===s?'selected-size':''} ${!sizeAvailable(s)?'size-unavailable':''}`} onClick={()=>{setSize(s);setError('')}}>{s}</button>)}</div>{error&&<p className="form-error">{error}</p>}<div className="quantity-row"><span>Quantity</span><div className="quantity-stepper"><button aria-label="Decrease quantity" onClick={()=>setQuantity(Math.max(1,quantity-1))}><Minus size={14}/></button><span>{quantity}</span><button aria-label="Increase quantity" onClick={()=>setQuantity(Math.min(selectedStock,quantity+1))} disabled={quantity>=selectedStock}><Plus size={14}/></button></div></div><div className="detail-actions"><button className="button button-blue add-cart-button" onClick={add} disabled={Boolean(size && !selectedStock)}>Add to bag <ShoppingBag size={17} /></button><button className={`detail-wish ${save?'is-saved':''}`} aria-label={save?'Remove from wishlist':'Add to wishlist'} onClick={async()=>{if(await dispatch({type:'toggleWish',id:product.id}))notify(save?'Removed from your little favorites':'Saved to your little favorites')}}><Heart fill={save?'currentColor':'none'} /></button></div><button className="button button-outline buy-now" onClick={async()=>{if(size){if(await add())navigate('/checkout')}else setError('Pick a size first so we can get the fit just right.')}}>Buy now <ArrowRight size={16}/></button><div className="delivery-note"><Truck size={17}/><span>Comfy looks on the way. <b>Free delivery over ₹1,499.</b></span></div><div className="detail-accordions">{['Product details','Material & care','Size & fit','Delivery & returns'].map((item)=><div className={`accordion ${open===item?'accordion-open':''}`} key={item}><button onClick={()=>setOpen(open===item?'':item)}>{item}<ChevronDown size={16}/></button>{open===item&&<p>{item==='Product details'?product.description:item==='Material & care'?`${product.material}. Machine wash cold with like colors. Dry in shade for a little longer-lasting love.`:item==='Size & fit'?'True to size with an easy, comfortable fit. Between sizes? We recommend choosing the larger size.':'Ships from our Darbhanga store. Easy 7-day returns on unworn items with tags attached.'}</p>}</div>)}</div></div></div><section className="you-may-like"><div className="section-heading heading-row"><h2>You might also like</h2><Link className="text-arrow" to="/shop">See all <ArrowRight size={15}/></Link></div><div className="recommend-grid">{catalog.filter(p=>p.category===product.category&&p.id!==product.id).slice(0,4).map(p=><ProductCard key={p.id} product={p}/>)}</div></section></main>
+      <div className="detail-main-image"><img src={mediaUrl(activeImage)} alt={`${product.name} in ${color}`} onError={(event)=>{event.currentTarget.src='/assets/shop-banner.jpg'}} /><span className="product-badge badge-pink">{product.newArrival?'JUST IN':product.discount + '% OFF'}</span></div>
+      <div className="detail-thumbnails" role="group" aria-label={`${product.name} ${color} images`}>{productImages.map((image,index)=><button type="button" className={'detail-thumbnail ' + (index===activeImageIndex?'is-selected':'')} key={color + '-' + image + '-' + index} aria-label={'View image ' + (index + 1) + ' of ' + product.name + ' in ' + color} aria-pressed={index===activeImageIndex} onClick={()=>setActiveImageIndex(index)}><img src={mediaUrl(image)} alt="" loading="lazy" /></button>)}</div>
+      </div><div className="detail-info"><span className="eyebrow">{product.category} · {product.subcategory}</span><h1>{product.name}</h1><div className="detail-rating">{stars} <b>{product.rating}</b> <span>({product.reviews} happy reviews)</span></div><div className="detail-price"><b>{money(product.price)}</b><del>{money(product.originalPrice)}</del><span>{product.discount}% off</span></div><p className="detail-description">{product.description}</p><div className="choice-label">Color <b>{color}</b>{colorSpecificImages.length > 0 && <span className="color-images-indicator">✦ {colorSpecificImages.length} {colorSpecificImages.length === 1 ? 'photo' : 'photos'} in {color}</span>}</div><div className="color-options">{product.colors.map((c)=><button disabled={!colorAvailable(c)} className={`color-dot ${color===c?'color-active':''} ${!colorAvailable(c)?'size-unavailable':''}`} style={{ backgroundColor: c.replace(/\s+/g, '').toLowerCase() }} key={c} aria-label={`Choose ${c}${colorAvailable(c)?'':' (out of stock)'}`} title={colorAvailable(c)?c:`${c} — out of stock`} onClick={()=>{setColor(c);if(size&&product.variants?.length&&!product.variants.some((variant)=>variant.size===size&&variant.color===c&&variant.stock>0))setSize('')}} />)}</div><div className="choice-label size-label">Choose size <Link to="/size-guide">Size guide <ArrowUpRight size={13} /></Link></div><div className="detail-sizes">{product.sizes.map((s)=><button key={s} disabled={!sizeAvailable(s)} className={`${size===s?'selected-size':''} ${!sizeAvailable(s)?'size-unavailable':''}`} onClick={()=>{setSize(s);setError('')}}>{s}</button>)}</div>{error&&<p className="form-error">{error}</p>}<div className="quantity-row"><span>Quantity</span><div className="quantity-stepper"><button aria-label="Decrease quantity" onClick={()=>setQuantity(Math.max(1,quantity-1))}><Minus size={14}/></button><span>{quantity}</span><button aria-label="Increase quantity" onClick={()=>setQuantity(Math.min(selectedStock,quantity+1))} disabled={quantity>=selectedStock}><Plus size={14}/></button></div></div><div className="detail-actions"><button className="button button-blue add-cart-button" onClick={add} disabled={Boolean(size && !selectedStock)}>Add to bag <ShoppingBag size={17} /></button><button className={`detail-wish ${save?'is-saved':''}`} aria-label={save?'Remove from wishlist':'Add to wishlist'} onClick={async()=>{if(await dispatch({type:'toggleWish',id:product.id}))notify(save?'Removed from your little favorites':'Saved to your little favorites')}}><Heart fill={save?'currentColor':'none'} /></button></div><button className="button button-outline buy-now" onClick={async()=>{if(size){if(await add())navigate('/checkout')}else setError('Pick a size first so we can get the fit just right.')}}>Buy now <ArrowRight size={16}/></button><div className="delivery-note"><Truck size={17}/><span>Comfy looks on the way. <b>Free delivery over ₹1,499.</b></span></div><div className="detail-accordions">{['Product details','Material & care','Size & fit','Delivery & returns'].map((item)=><div className={`accordion ${open===item?'accordion-open':''}`} key={item}><button onClick={()=>setOpen(open===item?'':item)}>{item}<ChevronDown size={16}/></button>{open===item&&<p>{item==='Product details'?product.description:item==='Material & care'?`${product.material}. Machine wash cold with like colors. Dry in shade for a little longer-lasting love.`:item==='Size & fit'?'True to size with an easy, comfortable fit. Between sizes? We recommend choosing the larger size.':'Ships from our Darbhanga store. Easy 7-day returns on unworn items with tags attached.'}</p>}</div>)}</div></div></div><section className="you-may-like"><div className="section-heading heading-row"><h2>You might also like</h2><Link className="text-arrow" to="/shop">See all <ArrowRight size={15}/></Link></div><div className="recommend-grid">{catalog.filter(p=>p.category===product.category&&p.id!==product.id).slice(0,4).map(p=><ProductCard key={p.id} product={p}/>)}</div></section></main>
 }
 
 function Cart() {
@@ -357,6 +366,59 @@ function SizeGuide() {
   return <main className="page-width size-guide-page"><Breadcrumbs items={[{label:'Size guide'}]} /><div className="size-guide-heading"><div><span className="eyebrow">A COMFY FIT, EVERY TIME</span><h1>Find their just-right size.</h1><p>Little bodies grow fast. Here’s a simple guide to help.</p></div><div className="measuring-doodle"><Shirt size={54}/><span>♡</span></div></div><div className="size-tabs">{['Girls','Boys','Baby'].map((c)=><button key={c} className={category===c?'tab-active':''} onClick={()=>setCategory(c)}>{c==='Baby'?<Baby size={16}/>:<Shirt size={16}/>} {c}</button>)}</div><div className="size-table-wrap"><table className="size-table"><thead><tr><th>Age</th><th>Height</th><th>Chest</th><th>Waist</th><th>Little Star size</th></tr></thead><tbody>{rows.map((r)=><tr key={r[0]}>{r.map((c,i)=><td key={i}>{c}</td>)}</tr>)}</tbody></table></div><div className="size-guide-note"><span>✦</span><div><b>Between two sizes?</b><p>We recommend choosing the larger size for a little extra room to grow.</p></div></div><div className="measure-note"><div><span>01</span><h3>Height</h3><p>Measure from the top of their head to the floor, with shoes off.</p></div><div><span>02</span><h3>Chest</h3><p>Wrap the tape around the fullest part, keeping it comfortably loose.</p></div><div><span>03</span><h3>Waist</h3><p>Measure around their natural waist, where trousers usually sit.</p></div></div><Link className="text-arrow size-help" to="/contact">Still not sure? We’re happy to help <ArrowRight size={15}/></Link></main>
 }
 
+function AdminErrorAlert({ message, onDismiss, title = 'Unable to save product' }) {
+  if (!message) return null
+
+  let displayTitle = title
+  let displayMessage = message
+  let hint = ''
+
+  if (
+    message.includes('E11000') ||
+    message.includes('duplicate key error') ||
+    message.includes('already exists') ||
+    message.includes('DUPLICATE_RECORD')
+  ) {
+    displayTitle = 'Duplicate Product Name'
+    const match =
+      message.match(/dup key: \{ [^:]*: "([^"]+)" \}/) ||
+      message.match(/slug: "([^"]+)"/) ||
+      message.match(/named "([^"]+)"/)
+    const name = match ? match[1] : ''
+    displayMessage = name
+      ? `A product named "${name}" already exists in your catalog.`
+      : 'A product with this name or slug already exists in your catalog.'
+    hint = 'Please enter a unique product name or edit the existing product from the catalog list.'
+  } else if (message.toLowerCase().includes('network') || message.toLowerCase().includes('fetch')) {
+    displayTitle = 'Connection Error'
+    displayMessage = 'Could not reach the server. Please check your internet connection and try again.'
+  }
+
+  return (
+    <div className="admin-error-banner" role="alert">
+      <div className="admin-error-icon-wrap">
+        <AlertCircle size={18} className="admin-error-icon" />
+      </div>
+      <div className="admin-error-content">
+        <h4 className="admin-error-title">{displayTitle}</h4>
+        <p className="admin-error-message">{displayMessage}</p>
+        {hint && <p className="admin-error-hint">{hint}</p>}
+      </div>
+      {onDismiss && (
+        <button
+          type="button"
+          className="admin-error-dismiss"
+          onClick={onDismiss}
+          aria-label="Dismiss error"
+          title="Dismiss"
+        >
+          <X size={15} />
+        </button>
+      )}
+    </div>
+  )
+}
+
 function AdminLayout({ children }) {
   const { user, logout } = useStore()
   return <div className="admin-layout"><aside className="admin-sidebar"><BrandMark/><div className="admin-label">SHOP MANAGEMENT</div><nav aria-label="Shop management"><NavLink to="/" end><LayoutDashboard size={17}/> Overview</NavLink><NavLink to="/products"><Shirt size={17}/> Products</NavLink><NavLink to="/orders"><ClipboardList size={17}/> Orders</NavLink><NavLink to="/customers"><Users size={17}/> Customers</NavLink><NavLink to="/messages"><Mail size={17}/> Messages</NavLink></nav><div className="admin-sidebar-bottom"><span className="admin-avatar" aria-hidden="true">LS</span><span><b>{user?.name || 'Little Star'}</b><small>Shop administrator</small></span><button className="icon-button" aria-label="Sign out" onClick={logout}><LogOut size={17}/></button></div></aside><main className="admin-content">{children}</main></div>
@@ -366,17 +428,41 @@ function AdminDashboard() {
   const { user, reloadCatalog, refreshCart } = useStore()
   const location = useLocation(); const page = location.pathname.split('/')[1] || 'overview'
   const [query, setQuery] = useState(''); const [status, setStatus] = useState(''); const [showForm, setShowForm] = useState(false)
-  const [rows, setRows] = useState([]); const [dashboard, setDashboard] = useState(null); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [editing, setEditing] = useState(null); const [saving, setSaving] = useState(false); const [viewingOrder, setViewingOrder] = useState(null)
+  const [rows, setRows] = useState([]); const [dashboard, setDashboard] = useState(null); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [formError, setFormError] = useState(''); const [editing, setEditing] = useState(null); const [saving, setSaving] = useState(false); const [viewingOrder, setViewingOrder] = useState(null)
+  const [formColors, setFormColors] = useState('')
+  const [activeColorTab, setActiveColorTab] = useState('')
+  const [urlInputForColor, setUrlInputForColor] = useState('')
+  const [customImageUrl, setCustomImageUrl] = useState('')
   const [imageItems, setImageItems] = useState([]); const [imageError, setImageError] = useState('')
-  const imageItemsRef = useRef([]); const imageInputRef = useRef(null)
+  const imageItemsRef = useRef([]); const fileInputsRef = useRef({})
   const savingRef = useRef(saving); savingRef.current = saving
+
+  const parsedColors = useMemo(() => {
+    return formColors.split(',').map((s) => s.trim()).filter(Boolean)
+  }, [formColors])
+
+  useEffect(() => {
+    if (parsedColors.length > 0 && (!activeColorTab || !parsedColors.some((c) => c.toLowerCase() === activeColorTab.toLowerCase()))) {
+      setActiveColorTab(parsedColors[0])
+    }
+  }, [parsedColors, activeColorTab])
+
   const replaceImageItems = useCallback((items) => {
     const keptObjectUrls = new Set(items.filter((item) => item.objectUrl).map((item) => item.preview))
     imageItemsRef.current.forEach((item) => { if (item.objectUrl && !keptObjectUrls.has(item.preview)) URL.revokeObjectURL(item.preview) })
     imageItemsRef.current = items
     setImageItems(items)
   }, [])
-  const closeProductForm = useCallback(() => { if (savingRef.current) return; setShowForm(false); setEditing(null); setImageError(''); replaceImageItems([]); if (imageInputRef.current) imageInputRef.current.value = '' }, [replaceImageItems])
+  const closeProductForm = useCallback(() => {
+    if (savingRef.current) return
+    setShowForm(false)
+    setEditing(null)
+    setImageError('')
+    setFormError('')
+    setUrlInputForColor('')
+    setCustomImageUrl('')
+    replaceImageItems([])
+  }, [replaceImageItems])
   useEffect(() => () => imageItemsRef.current.forEach((item) => { if (item.objectUrl) URL.revokeObjectURL(item.preview) }), [])
   useEffect(() => {
     if (!showForm) return
@@ -406,44 +492,147 @@ function AdminDashboard() {
   if (user?.role !== 'admin') return <main className="page-width not-found"><span>✦</span><h1>Administrator sign-in required.</h1><p>Sign in with the shop administrator account to manage the store.</p><Link className="button button-blue" to="/login">Sign in <ArrowRight size={15}/></Link></main>
   const formatDate = (date) => new Date(date).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})
   const orderStatusLabel = (value) => !value ? 'Unknown' : value === 'confirmed' ? 'Processing' : value.charAt(0).toUpperCase() + value.slice(1)
-  const openNew = () => { setEditing(null); setImageError(''); replaceImageItems([]); if (imageInputRef.current) imageInputRef.current.value = ''; setShowForm(true) }
-  const openEdit = (product) => { setEditing(product); setImageError(''); replaceImageItems((product.images || []).map((url, index) => ({ key: `existing-${index}-${url}`, url, preview: mediaUrl(url), file: null, objectUrl: false }))); if (imageInputRef.current) imageInputRef.current.value = ''; setShowForm(true) }
-  const selectProductImages = (event) => {
+  const openNew = () => {
+    setEditing(null)
+    setImageError('')
+    setFormError('')
+    setFormColors('Pink, Blue')
+    setActiveColorTab('Pink')
+    setUrlInputForColor('')
+    setCustomImageUrl('')
+    replaceImageItems([])
+    setShowForm(true)
+  }
+  const openEdit = (product) => {
+    setEditing(product)
+    setImageError('')
+    setFormError('')
+    const initialColors = product.colors?.join(', ') || ''
+    setFormColors(initialColors)
+    const firstCol = product.colors?.[0] || 'Default'
+    setActiveColorTab(firstCol)
+    setUrlInputForColor('')
+    setCustomImageUrl('')
+
+    let items = []
+    if (product.colorImages?.length > 0) {
+      items = product.colorImages.flatMap((entry) =>
+        (entry.images || []).map((url, idx) => ({
+          key: `existing-${entry.color}-${idx}-${url}`,
+          color: entry.color,
+          url,
+          preview: mediaUrl(url),
+          file: null,
+          objectUrl: false,
+        }))
+      )
+    } else if (product.images?.length > 0) {
+      items = product.images.map((url, idx) => ({
+        key: `existing-${firstCol}-${idx}-${url}`,
+        color: firstCol,
+        url,
+        preview: mediaUrl(url),
+        file: null,
+        objectUrl: false,
+      }))
+    }
+    replaceImageItems(items)
+    setShowForm(true)
+  }
+  const selectProductImagesForColor = (event, color) => {
     const files = Array.from(event.target.files || [])
     event.target.value = ''
     if (!files.length) return
     if (files.some((file) => !['image/jpeg', 'image/png', 'image/webp'].includes(file.type))) { setImageError('Choose JPEG, PNG, or WebP image files.'); return }
     if (files.some((file) => file.size > 5 * 1024 * 1024)) { setImageError('Each image must be 5 MB or smaller.'); return }
-    if (imageItemsRef.current.length + files.length > 8) { setImageError('A product can have up to 8 images. Remove an image before adding more.'); return }
-    const next = files.map((file, index) => { const preview = URL.createObjectURL(file); return { key: `upload-${Date.now()}-${index}-${file.name}`, preview, file, objectUrl: true } })
+    const colorCount = imageItemsRef.current.filter((item) => item.color?.toLowerCase() === color.toLowerCase()).length
+    if (colorCount + files.length > 15) { setImageError(`Up to 15 images allowed for ${color}. Remove an image before adding more.`); return }
+    const next = files.map((file, index) => {
+      const preview = URL.createObjectURL(file)
+      return { key: `upload-${color}-${Date.now()}-${index}-${file.name}`, color, preview, file, objectUrl: true }
+    })
     replaceImageItems([...imageItemsRef.current, ...next])
     setImageError('')
   }
-  const removeProductImage = (index) => { replaceImageItems(imageItemsRef.current.filter((_, itemIndex) => itemIndex !== index)); setImageError('') }
+  const addImageUrlForColor = (color) => {
+    const trimmed = customImageUrl.trim()
+    if (!trimmed) return
+    if (!(/^\/(?!\/)/.test(trimmed) || /^https?:\/\//i.test(trimmed))) {
+      setImageError('Image URL must start with / (local path) or http:// or https://')
+      return
+    }
+    const nextItem = {
+      key: `url-${color}-${Date.now()}-${trimmed}`,
+      color,
+      url: trimmed,
+      preview: mediaUrl(trimmed),
+      file: null,
+      objectUrl: false,
+    }
+    replaceImageItems([...imageItemsRef.current, nextItem])
+    setCustomImageUrl('')
+    setUrlInputForColor('')
+    setImageError('')
+  }
+  const removeProductImage = (key) => {
+    replaceImageItems(imageItemsRef.current.filter((item) => item.key !== key))
+    setImageError('')
+  }
+  const setCoverForColor = (color, key) => {
+    const colorItems = imageItemsRef.current.filter((item) => item.color?.toLowerCase() === color.toLowerCase())
+    const otherItems = imageItemsRef.current.filter((item) => item.color?.toLowerCase() !== color.toLowerCase())
+    const targetIdx = colorItems.findIndex((item) => item.key === key)
+    if (targetIdx > 0) {
+      const target = colorItems[targetIdx]
+      colorItems.splice(targetIdx, 1)
+      colorItems.unshift(target)
+      replaceImageItems([...colorItems, ...otherItems])
+    }
+  }
   const submitProduct = async (event) => {
-    event.preventDefault(); setSaving(true); setError('')
+    event.preventDefault(); setSaving(true); setFormError('')
     const form = event.currentTarget; const data = new FormData(form)
     const body = { name: data.get('name'), category: data.get('category'), price: Number(data.get('price')), stock: Number(data.get('stock')) || 0 }
-    if (data.get('colors')) body.colors = data.get('colors').split(',').map(s => s.trim()).filter(Boolean)
-    if (data.get('sizes')) body.sizes = data.get('sizes').split(',').map(s => s.trim()).filter(Boolean)
-    const existingImages = imageItemsRef.current.filter((item) => !item.file && item.url).map((item) => item.url)
-    const newFiles = imageItemsRef.current.filter((item) => item.file).map((item) => item.file)
+    const colors = formColors.split(',').map((s) => s.trim()).filter(Boolean)
+    if (!colors.length) { setFormError('Please provide at least one color.'); setSaving(false); return }
+    body.colors = colors
+    if (data.get('sizes')) body.sizes = data.get('sizes').split(',').map((s) => s.trim()).filter(Boolean)
+
+    const newFiles = imageItemsRef.current.filter((item) => item.file)
     let uploadedImages = []
     try {
       if (newFiles.length) {
         const uploadForm = new FormData()
-        newFiles.forEach((file) => uploadForm.append('images', file))
+        newFiles.forEach((item) => uploadForm.append('images', item.file))
         uploadedImages = (await api('/admin/uploads', { method: 'POST', body: uploadForm })).images
       }
-      body.images = [...existingImages, ...uploadedImages]
-      if (!body.images.length) body.images = ['/assets/products/girl-01.jpg']
+      let uploadIdx = 0
+      const resolvedItems = imageItemsRef.current.map((item) => {
+        if (item.file) {
+          const uploadedUrl = uploadedImages[uploadIdx++]
+          return { ...item, url: uploadedUrl }
+        }
+        return item
+      })
+
+      const colorImages = colors.map((col) => ({
+        color: col,
+        images: resolvedItems
+          .filter((item) => item.color?.toLowerCase() === col.toLowerCase() && item.url)
+          .map((item) => item.url),
+      }))
+
+      body.colorImages = colorImages
+      const allImages = [...new Set(colorImages.flatMap((c) => c.images).concat(resolvedItems.filter((item) => !item.color && item.url).map((item) => item.url)))].filter(Boolean)
+      body.images = allImages.length ? allImages : ['/assets/products/girl-01.jpg']
+
       await api(editing ? `/products/${encodeURIComponent(editing.id)}` : '/products', { method: editing ? 'PUT' : 'POST', body })
       const removedUploads = (editing?.images || []).filter((image) => image.startsWith('/uploads/') && !body.images.includes(image))
       if (removedUploads.length) await api('/admin/uploads', { method: 'DELETE', body: { images: removedUploads } }).catch(() => {})
-      setShowForm(false); setEditing(null); setImageError(''); replaceImageItems([]); form.reset(); await load(); await reloadCatalog()
+      setShowForm(false); setEditing(null); setImageError(''); setFormError(''); replaceImageItems([]); form.reset(); await load(); await reloadCatalog()
     } catch (requestError) {
       if (uploadedImages.length) await api('/admin/uploads', { method: 'DELETE', body: { images: uploadedImages } }).catch(() => {})
-      setError(requestError.message || 'Could not save the product.')
+      setFormError(requestError.message || 'Could not save the product.')
     }
     finally { setSaving(false) }
   }
@@ -464,31 +653,153 @@ function AdminDashboard() {
   }
   if (page === 'products') return <AdminLayout>
     <div className="admin-top"><div><span>CATALOGUE</span><h1>Products</h1></div><button className="admin-primary" onClick={openNew}><Plus size={16}/> Add product</button></div>
-    {error&&<p className="form-error" role="alert">{error}</p>}
+    {error&&<AdminErrorAlert message={error} onDismiss={() => setError('')} title="Catalogue Notice" />}
     <div className="admin-table-card">
       <div className="admin-table-head"><h2 id="admin-products-heading">All products <span>{rows.length}</span></h2><div className="admin-search"><Search size={16}/><input type="search" inputMode="search" value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Search products" aria-label="Search admin products"/></div></div>
       <table className="admin-table" aria-labelledby="admin-products-heading"><thead><tr><th>PRODUCT</th><th>CATEGORY</th><th>PRICE</th><th>STOCK</th><th>ACTIONS</th></tr></thead><tbody>{rows.map((product, index)=><tr key={product._id || product.id || index}><td data-label="Product"><div className="admin-product"><img src={mediaUrl(product.images?.[0]) || '/assets/products/girl-01.jpg'} alt=""/><b>{product.name}</b></div></td><td data-label="Category">{product.category}</td><td data-label="Price">{money(product.price)}</td><td data-label="Stock">{(product.stock ?? 0) === 0 ? <span className="admin-status status-stock-out">Stock out</span> : `${product.stock} units`}</td><td data-label="Actions" className="admin-product-actions"><div className="action-buttons-wrap"><button className="admin-icon-btn edit-btn" onClick={()=>openEdit(product)} title="Edit Product"><Pencil size={14}/> <span>Edit</span></button> <button className="admin-icon-btn deactivate-btn" onClick={()=>deleteProduct(product)} title="Delete Product"><Trash2 size={14}/> <span>Delete</span></button></div></td></tr>)}</tbody></table>
       {loading&&<p className="admin-empty" role="status">Loading products…</p>}{!loading&&!rows.length&&<p className="admin-empty">No products found.</p>}
     </div>
     {showForm&&<div className="admin-modal-backdrop" role="presentation" onClick={closeProductForm}><section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="admin-modal-title" onClick={(event)=>event.stopPropagation()}><button className="admin-modal-close" aria-label="Close" onClick={closeProductForm}><X size={18}/></button><span className="eyebrow">A NEW LITTLE LOOK</span><h2 id="admin-modal-title">{editing?'Edit product':'Add a product'}</h2><form onSubmit={submitProduct}>
-      <label>Product name<input required minLength="2" name="name" pattern=".*\S.*" defaultValue={editing?.name || ''} placeholder="e.g. Sunny Day Dress" autoComplete="off"/></label>
+      <label>Product name<input required minLength="2" name="name" pattern=".*\S.*" defaultValue={editing?.name || ''} placeholder="e.g. Sunny Day Dress" autoComplete="off" className={formError && (formError.toLowerCase().includes('name') || formError.toLowerCase().includes('duplicate') || formError.toLowerCase().includes('slug')) ? 'input-has-error' : ''} onChange={() => { if (formError) setFormError('') }}/></label>
       <label>Category<select name="category" defaultValue={editing?.category || 'Girls'}><option>Girls</option><option>Boys</option><option>Baby</option></select></label>
       <div className="field-grid"><label>Price (₹)<input required name="price" type="number" inputMode="decimal" min="1" defaultValue={editing?.price || ''} placeholder="999"/></label><label>Stock<input name="stock" type="number" inputMode="numeric" min="0" defaultValue={editing?.stock ?? 0} placeholder="0"/></label></div>
-      <div className="field-grid"><label>Colors<input required name="colors" defaultValue={editing?.colors?.join(', ') || ''} placeholder="e.g. Pink, Blue" autoComplete="off"/></label><label>Sizes<input required name="sizes" defaultValue={editing?.sizes?.join(', ') || ''} placeholder="e.g. 2Y, 3Y, 4Y" autoComplete="off"/></label></div>
-      <fieldset className="admin-image-field"><legend>Product images</legend><input ref={imageInputRef} className="admin-file-input" id="admin-product-images" type="file" accept="image/jpeg,image/png,image/webp" multiple aria-describedby="admin-image-help" onChange={selectProductImages}/><button type="button" className="admin-upload-button" onClick={()=>imageInputRef.current?.click()}><Plus size={16}/> Add images</button><p id="admin-image-help" className="admin-image-help">Up to 8 images · JPEG, PNG, or WebP · 5 MB max each.</p>{imageError&&<p className="form-error" role="alert">{imageError}</p>}{imageItems.length>0?<div className="admin-image-grid">{imageItems.map((image,index)=><div className="admin-image-preview" key={image.key}><img src={image.preview} alt={'Product image ' + (index + 1) + ' preview'}/>{index===0&&<span className="admin-image-cover">Cover</span>}<button type="button" aria-label={'Remove image ' + (index + 1)} onClick={()=>removeProductImage(index)}><X size={15}/></button></div>)}</div>:<p className="admin-image-empty">No images selected. The standard shop image will be used until you add photos.</p>}</fieldset>
-      {error&&<p className="form-error" role="alert">{error}</p>}<button className="admin-primary" disabled={saving || Boolean(imageError)}><Plus size={15}/>{saving?'Uploading & saving…':'Save product'}</button>
+      <div className="field-grid"><label>Colors (comma separated)<input required name="colors" value={formColors} onChange={(e) => setFormColors(e.target.value)} placeholder="e.g. Pink, Blue" autoComplete="off"/><small style={{display:'block',color:'var(--gray-500)',marginTop:'4px',fontSize:'0.75rem'}}>Each color creates an image tab below.</small></label><label>Sizes<input required name="sizes" defaultValue={editing?.sizes?.join(', ') || ''} placeholder="e.g. 2Y, 3Y, 4Y" autoComplete="off"/></label></div>
+      <div className="color-image-categories">
+        <div className="color-category-header">
+          <div>
+            <div className="color-category-title"><Sparkles size={14} color="#3b82f6"/> Color-Categorized Product Images</div>
+            <p className="color-category-hint">Upload or add photos for each color individually so customers see that color's photos when browsing.</p>
+          </div>
+        </div>
+        {parsedColors.length > 0 ? (
+          <>
+            <div className="color-tabs-bar" role="tablist" aria-label="Product color categories">
+              {parsedColors.map((col) => {
+                const count = imageItems.filter((item) => item.color?.toLowerCase() === col.toLowerCase()).length
+                const isActive = activeColorTab?.toLowerCase() === col.toLowerCase()
+                return (
+                  <button
+                    key={col}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    className={`color-tab-btn ${isActive ? 'is-active' : ''}`}
+                    onClick={() => { setActiveColorTab(col); setUrlInputForColor('') }}
+                  >
+                    <span className="color-swatch-dot" style={{ backgroundColor: col.replace(/\s+/g, '').toLowerCase() }} />
+                    <span>{col}</span>
+                    <span className="color-badge-count" title={`${count} images for ${col}`}>{count}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {activeColorTab && (() => {
+              const currentTabImages = imageItems.filter((item) => item.color?.toLowerCase() === activeColorTab.toLowerCase())
+              const isUrlOpen = urlInputForColor === activeColorTab
+              return (
+                <div className="color-category-panel" role="tabpanel">
+                  <div className="color-panel-top">
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#334155' }}>
+                      Images for <b style={{ color: '#1e293b' }}>{activeColorTab}</b> ({currentTabImages.length})
+                    </span>
+                    <div className="color-panel-actions">
+                      <input
+                        ref={(el) => { fileInputsRef.current[activeColorTab] = el }}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        multiple
+                        style={{ display: 'none' }}
+                        onChange={(e) => selectProductImagesForColor(e, activeColorTab)}
+                      />
+                      <button
+                        type="button"
+                        className="color-upload-btn"
+                        onClick={() => fileInputsRef.current[activeColorTab]?.click()}
+                      >
+                        <Plus size={14} /> Upload photos
+                      </button>
+                      <button
+                        type="button"
+                        className="color-url-btn"
+                        onClick={() => {
+                          setUrlInputForColor(isUrlOpen ? '' : activeColorTab)
+                          setCustomImageUrl('')
+                        }}
+                      >
+                        {isUrlOpen ? 'Cancel URL' : '+ Add URL'}
+                      </button>
+                    </div>
+                  </div>
+                  {isUrlOpen && (
+                    <div className="color-url-input-row">
+                      <input
+                        type="text"
+                        placeholder="Image path or URL (e.g. /assets/products/girl-01.jpg or https://...)"
+                        value={customImageUrl}
+                        onChange={(e) => setCustomImageUrl(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addImageUrlForColor(activeColorTab) } }}
+                      />
+                      <button type="button" onClick={() => addImageUrlForColor(activeColorTab)}>
+                        Add
+                      </button>
+                    </div>
+                  )}
+                  {currentTabImages.length > 0 ? (
+                    <div className="color-image-grid">
+                      {currentTabImages.map((image, index) => (
+                        <div className="color-image-card" key={image.key}>
+                          <img src={image.preview} alt={`${activeColorTab} photo ${index + 1}`} />
+                          {index === 0 && <span className="color-cover-badge">Cover</span>}
+                          <button
+                            type="button"
+                            className="color-img-remove-btn"
+                            aria-label={`Remove photo ${index + 1} for ${activeColorTab}`}
+                            onClick={() => removeProductImage(image.key)}
+                          >
+                            <X size={13} />
+                          </button>
+                          {index > 0 && (
+                            <button
+                              type="button"
+                              className="color-set-cover-btn"
+                              onClick={() => setCoverForColor(activeColorTab, image.key)}
+                            >
+                              Make cover
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="admin-image-empty" style={{ margin: '8px 0', fontSize: '12px' }}>
+                      No photos added for {activeColorTab} yet. Click <b>Upload photos</b> or <b>+ Add URL</b> to add images for this color.
+                    </p>
+                  )}
+                </div>
+              )
+            })()}
+          </>
+        ) : (
+          <p className="admin-image-empty" style={{ margin: '4px 0' }}>
+            Please type at least one color in the Colors field above to begin categorizing photos by color.
+          </p>
+        )}
+        {imageError && <p className="form-error" role="alert">{imageError}</p>}
+      </div>
+      {formError && <AdminErrorAlert message={formError} onDismiss={() => setFormError('')} />}
+      <button className="admin-primary" disabled={saving || Boolean(imageError)}><Plus size={15}/>{saving?'Uploading & saving…':'Save product'}</button>
     </form></section></div>}
   </AdminLayout>
   if (page === 'orders') {
     const orderRows = rows.map((order)=>[order.orderNumber,formatDate(order.createdAt),order.buyer?.name || 'Guest',money(order.total),orderStatusLabel(order.orderStatus),order._id,order.orderStatus,order])
-    return <AdminLayout><div className="admin-top"><div><span>FULFILMENT</span><h1>Orders</h1></div><label className="admin-filter">Status <select aria-label="Filter orders by status" value={status} onChange={(event)=>setStatus(event.target.value)}><option value="">All orders</option><option value="confirmed">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></label></div>{error&&<p className="form-error" role="alert">{error}</p>}<div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-orders-heading">Recent orders</h2><div className="admin-search"><Search size={16}/><input type="search" inputMode="search" value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search orders" aria-label="Search admin orders"/></div></div>{loading?<p className="admin-empty" role="status">Loading orders…</p>:<AdminDataTable rows={orderRows} onStatusChange={updateOrder} onDeleteOrder={deleteOrder} onViewOrder={setViewingOrder} labelledBy="admin-orders-heading"/>}</div>
+    return <AdminLayout><div className="admin-top"><div><span>FULFILMENT</span><h1>Orders</h1></div><label className="admin-filter">Status <select aria-label="Filter orders by status" value={status} onChange={(event)=>setStatus(event.target.value)}><option value="">All orders</option><option value="confirmed">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></label></div>{error&&<AdminErrorAlert message={error} onDismiss={() => setError('')} title="Orders Notice" />}<div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-orders-heading">Recent orders</h2><div className="admin-search"><Search size={16}/><input type="search" inputMode="search" value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search orders" aria-label="Search admin orders"/></div></div>{loading?<p className="admin-empty" role="status">Loading orders…</p>:<AdminDataTable rows={orderRows} onStatusChange={updateOrder} onDeleteOrder={deleteOrder} onViewOrder={setViewingOrder} labelledBy="admin-orders-heading"/>}</div>
     {viewingOrder&&<div className="admin-modal-backdrop" role="presentation" onClick={()=>setViewingOrder(null)}><section className="admin-modal" style={{ width: '700px', maxWidth: '90vw' }} role="dialog" aria-modal="true" aria-labelledby="order-details-title" onClick={(event)=>event.stopPropagation()}><button className="admin-modal-close" aria-label="Close" onClick={()=>setViewingOrder(null)}><X size={18}/></button><span className="eyebrow">ORDER DETAILS</span><h2 id="order-details-title">{viewingOrder.orderNumber}</h2><div className="field-grid" style={{marginBottom:'2rem',marginTop:'1.5rem'}}><div><span className="eyebrow">CUSTOMER</span><p style={{margin:'0.5rem 0',fontSize:'0.95rem'}}>{viewingOrder.buyer?.name || 'Guest'}<br/>{viewingOrder.buyer?.email}<br/>{viewingOrder.buyer?.phone}</p></div><div><span className="eyebrow">SHIPPING ADDRESS</span><p style={{margin:'0.5rem 0',fontSize:'0.95rem'}}>{viewingOrder.shippingAddress?.street}<br/>{viewingOrder.shippingAddress?.city}, {viewingOrder.shippingAddress?.state} {viewingOrder.shippingAddress?.postalCode}<br/>{viewingOrder.shippingAddress?.country}</p></div></div><span className="eyebrow">ORDER ITEMS</span><div style={{ overflowX: 'auto', width: '100%', marginTop: '0.5rem' }}><table className="admin-table"><thead><tr><th>PRODUCT</th><th>DETAILS</th><th>PRICE</th><th>QTY</th><th>TOTAL</th></tr></thead><tbody>{viewingOrder.items.map((item)=><tr key={item.product+item.size+item.color}><td data-label="Product"><b>{item.name}</b></td><td data-label="Details">{item.size}, {item.color}</td><td data-label="Price">{money(item.unitPrice)}</td><td data-label="Qty">{item.quantity}</td><td data-label="Total">{money(item.unitPrice * item.quantity)}</td></tr>)}</tbody></table></div><div style={{marginTop:'1.5rem',display:'flex',justifyContent:'space-between',alignItems:'center',padding:'1rem',background:'var(--gray-50)',borderRadius:'8px'}}><b>Total Amount:</b> <b style={{fontSize:'1.1rem'}}>{money(viewingOrder.total)}</b></div></section></div>}
     </AdminLayout>
   }
-  if (page === 'customers') return <AdminLayout><div className="admin-top"><div><span>YOUR COMMUNITY</span><h1>Customers</h1></div><span className="admin-filter"><Users size={15}/> {rows.length} customers</span></div>{error&&<p className="form-error" role="alert">{error}</p>}<div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-customers-heading">Little Star families <span>{rows.length}</span></h2><div className="admin-search"><Search size={16}/><input type="search" inputMode="search" value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search customers" aria-label="Search admin customers"/></div></div><table className="admin-table" aria-labelledby="admin-customers-heading"><thead><tr><th>CUSTOMER</th><th>ORDERS</th><th>TOTAL SPENT</th><th>LAST ORDER</th><th>STATUS</th></tr></thead><tbody>{rows.map((customer)=><tr key={customer._id}><td data-label="Customer"><div className="customer-name"><span aria-hidden="true">{(customer.name || 'User').split(' ').map((word)=>word[0]).join('')}</span><b>{customer.name || 'User'}</b></div></td><td data-label="Orders">{customer.orderStats?.orderCount || 0}</td><td data-label="Total spent">{money(customer.orderStats?.amountSpent || 0)}</td><td data-label="Last order">{customer.orderStats?.lastOrderAt ? formatDate(customer.orderStats.lastOrderAt) : '—'}</td><td data-label="Status"><span className="admin-status status-active">{customer.isActive?'Active':'Inactive'}</span></td></tr>)}</tbody></table>{loading&&<p className="admin-empty" role="status">Loading customers…</p>}</div></AdminLayout>
-  if (page === 'messages') return <AdminLayout><div className="admin-top"><div><span>CUSTOMER CARE</span><h1>Messages</h1></div><span className="admin-filter"><Mail size={15}/> {rows.length} messages</span></div>{error&&<p className="form-error" role="alert">{error}</p>}<div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-messages-heading">Contact messages <span>{rows.length}</span></h2><div className="admin-search"><Search size={16}/><input type="search" inputMode="search" value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search messages" aria-label="Search admin messages"/></div></div>{loading?<p className="admin-empty" role="status">Loading messages…</p>:rows.length?<table className="admin-table" aria-labelledby="admin-messages-heading"><thead><tr><th>FROM</th><th>PHONE</th><th>MESSAGE</th><th>RECEIVED</th><th>STATUS</th></tr></thead><tbody>{rows.map((message)=><tr key={message._id}><td data-label="From"><b>{message.name}</b><small>{message.email}</small></td><td data-label="Phone">{message.phone}</td><td data-label="Message" className="admin-message-cell">{message.message}</td><td data-label="Received">{formatDate(message.createdAt)}</td><td data-label="Status"><select aria-label={`Status for ${message.name}`} value={message.status} onChange={async(event)=>{try{await api(`/admin/contact-messages/${message._id}`,{method:'PATCH',body:{status:event.target.value}});await load()}catch(requestError){setError(requestError.message)}}}><option value="new">New</option><option value="read">Read</option><option value="resolved">Resolved</option></select></td></tr>)}</tbody></table>:<p className="admin-empty">No contact messages yet.</p>}</div></AdminLayout>
+  if (page === 'customers') return <AdminLayout><div className="admin-top"><div><span>YOUR COMMUNITY</span><h1>Customers</h1></div><span className="admin-filter"><Users size={15}/> {rows.length} customers</span></div>{error&&<AdminErrorAlert message={error} onDismiss={() => setError('')} title="Customers Notice" />}<div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-customers-heading">Little Star families <span>{rows.length}</span></h2><div className="admin-search"><Search size={16}/><input type="search" inputMode="search" value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search customers" aria-label="Search admin customers"/></div></div><table className="admin-table" aria-labelledby="admin-customers-heading"><thead><tr><th>CUSTOMER</th><th>ORDERS</th><th>TOTAL SPENT</th><th>LAST ORDER</th><th>STATUS</th></tr></thead><tbody>{rows.map((customer)=><tr key={customer._id}><td data-label="Customer"><div className="customer-name"><span aria-hidden="true">{(customer.name || 'User').split(' ').map((word)=>word[0]).join('')}</span><b>{customer.name || 'User'}</b></div></td><td data-label="Orders">{customer.orderStats?.orderCount || 0}</td><td data-label="Total spent">{money(customer.orderStats?.amountSpent || 0)}</td><td data-label="Last order">{customer.orderStats?.lastOrderAt ? formatDate(customer.orderStats.lastOrderAt) : '—'}</td><td data-label="Status"><span className="admin-status status-active">{customer.isActive?'Active':'Inactive'}</span></td></tr>)}</tbody></table>{loading&&<p className="admin-empty" role="status">Loading customers…</p>}</div></AdminLayout>
+  if (page === 'messages') return <AdminLayout><div className="admin-top"><div><span>CUSTOMER CARE</span><h1>Messages</h1></div><span className="admin-filter"><Mail size={15}/> {rows.length} messages</span></div>{error&&<AdminErrorAlert message={error} onDismiss={() => setError('')} title="Messages Notice" />}<div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-messages-heading">Contact messages <span>{rows.length}</span></h2><div className="admin-search"><Search size={16}/><input type="search" inputMode="search" value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search messages" aria-label="Search admin messages"/></div></div>{loading?<p className="admin-empty" role="status">Loading messages…</p>:rows.length?<table className="admin-table" aria-labelledby="admin-messages-heading"><thead><tr><th>FROM</th><th>PHONE</th><th>MESSAGE</th><th>RECEIVED</th><th>STATUS</th></tr></thead><tbody>{rows.map((message)=><tr key={message._id}><td data-label="From"><b>{message.name}</b><small>{message.email}</small></td><td data-label="Phone">{message.phone}</td><td data-label="Message" className="admin-message-cell">{message.message}</td><td data-label="Received">{formatDate(message.createdAt)}</td><td data-label="Status"><select aria-label={`Status for ${message.name}`} value={message.status} onChange={async(event)=>{try{await api(`/admin/contact-messages/${message._id}`,{method:'PATCH',body:{status:event.target.value}});await load()}catch(requestError){setError(requestError.message)}}}><option value="new">New</option><option value="read">Read</option><option value="resolved">Resolved</option></select></td></tr>)}</tbody></table>:<p className="admin-empty">No contact messages yet.</p>}</div></AdminLayout>
   const recent = (dashboard?.recentOrders || []).map((order)=>[order.orderNumber,formatDate(order.createdAt),order.buyer?.name || 'Guest',money(order.total),orderStatusLabel(order.orderStatus),order._id,order.orderStatus])
-  return <AdminLayout><div className="admin-top"><div><span>SHOP OVERVIEW</span><h1>Good afternoon, {user.name} ✦</h1><p>Here’s what’s happening at your shop today.</p></div><span className="admin-filter"><Clock3 size={15}/> Live data</span></div>{error&&<p className="form-error" role="alert">{error}</p>}<div className="admin-stats"><div><span>Total orders</span><b>{dashboard?.totalOrders ?? '—'}</b><small>All orders</small><ClipboardList/></div><div><span>Total sales</span><b>{money(dashboard?.totalSales || 0)}</b><small>Excluding cancelled</small><span className="stat-rupee">₹</span></div><div><span>Products</span><b>{dashboard?.products ?? '—'}</b><small>Active styles</small><Shirt/></div><div><span>Customers</span><b>{dashboard?.customers ?? '—'}</b><small>Registered families</small><Users/></div></div><div className="admin-lower"><div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-dashboard-orders-heading">Recent orders</h2><Link to="/admin/orders">View all <ArrowRight size={14}/></Link></div>{loading?<p className="admin-empty" role="status">Loading dashboard…</p>:<AdminDataTable rows={recent} compact onStatusChange={updateOrder} labelledBy="admin-dashboard-orders-heading"/>}</div><div className="admin-side-card"><span className="eyebrow">SHOP MANAGEMENT</span><div className="admin-note-icon"><Star fill="currentColor"/></div><h2>Your shop is shining.</h2><p>{dashboard?.products || 0} lovely styles are active. Review stock and keep the little stars coming back for more.</p><Link to="/admin/products" className="text-arrow">Manage products <ArrowRight size={15}/></Link></div></div></AdminLayout>
+  return <AdminLayout><div className="admin-top"><div><span>SHOP OVERVIEW</span><h1>Good afternoon, {user.name} ✦</h1><p>Here’s what’s happening at your shop today.</p></div><span className="admin-filter"><Clock3 size={15}/> Live data</span></div>{error&&<AdminErrorAlert message={error} onDismiss={() => setError('')} title="Dashboard Notice" />}<div className="admin-stats"><div><span>Total orders</span><b>{dashboard?.totalOrders ?? '—'}</b><small>All orders</small><ClipboardList/></div><div><span>Total sales</span><b>{money(dashboard?.totalSales || 0)}</b><small>Excluding cancelled</small><span className="stat-rupee">₹</span></div><div><span>Products</span><b>{dashboard?.products ?? '—'}</b><small>Active styles</small><Shirt/></div><div><span>Customers</span><b>{dashboard?.customers ?? '—'}</b><small>Registered families</small><Users/></div></div><div className="admin-lower"><div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-dashboard-orders-heading">Recent orders</h2><Link to="/admin/orders">View all <ArrowRight size={14}/></Link></div>{loading?<p className="admin-empty" role="status">Loading dashboard…</p>:<AdminDataTable rows={recent} compact onStatusChange={updateOrder} labelledBy="admin-dashboard-orders-heading"/>}</div><div className="admin-side-card"><span className="eyebrow">SHOP MANAGEMENT</span><div className="admin-note-icon"><Star fill="currentColor"/></div><h2>Your shop is shining.</h2><p>{dashboard?.products || 0} lovely styles are active. Review stock and keep the little stars coming back for more.</p><Link to="/admin/products" className="text-arrow">Manage products <ArrowRight size={15}/></Link></div></div></AdminLayout>
 }
 
 function AdminDataTable({ rows, compact = false, onStatusChange, onDeleteOrder, onViewOrder, labelledBy }) {

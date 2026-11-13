@@ -2,8 +2,8 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams, Navigate } from 'react-router-dom'
 import {
-  ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Baby, BadgeCheck, Check, ChevronDown, ChevronRight,
-  CircleUserRound, ClipboardList, Clock3, CreditCard, Facebook, Heart, House, Instagram, LayoutDashboard,
+  AlertCircle, ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Baby, BadgeCheck, Check, ChevronDown, ChevronRight,
+  CircleUserRound, ClipboardList, Clock3, CreditCard, Eye, Facebook, Heart, House, Instagram, LayoutDashboard,
   LockKeyhole, LogOut, Mail, MapPin, Menu, Minus, PackageCheck, Pencil, Phone, Plus, Search, Send, ShieldCheck, Shirt,
   ShoppingBag, SlidersHorizontal, Sparkles, Star, Trash2, Truck, UserRound, Users, X,
 } from 'lucide-react'
@@ -183,21 +183,28 @@ function ProductCard({ product, large = false }) {
   const { wishlist, dispatch, notify } = useStore()
   const [sizeOpen, setSizeOpen] = useState(false)
   const [size, setSize] = useState('')
+  const [selectedColor, setSelectedColor] = useState(product.colors?.[0] || '')
   const saved = wishlist.includes(product.id)
   const add = async () => {
     if (!size) { notify('Choose a size to add this little favourite.'); return }
-    const saved = await dispatch({ type: 'add', item: { id: product.id, size, color: product.colors[0], quantity: 1 } })
+    const saved = await dispatch({ type: 'add', item: { id: product.id, size, color: selectedColor || product.colors[0], quantity: 1 } })
     if (saved) { notify(`${product.name} added to your bag`); setSizeOpen(false) }
   }
+  const currentColorEntry = product.colorImages?.find(
+    (ci) => ci.color?.toLowerCase()?.trim() === selectedColor?.toLowerCase()?.trim()
+  )
+  const cardImage = currentColorEntry?.images?.[0] || product.images?.[0] || '/assets/products/girl-01.jpg'
   return <article className={`product-card ${large ? 'product-card-large' : ''}`}>
     <div className="product-image-wrap">
-      <Link to={`/product/${product.id}`} className="product-photo"><img src={mediaUrl(product.images?.[0]) || '/assets/products/girl-01.jpg'} alt={`${product.name} kidswear`} loading="lazy" onError={(e) => { e.currentTarget.src = '/assets/shop-banner.jpg' }} /></Link>
+      <Link to={`/product/${product.id}`} className="product-photo"><img src={mediaUrl(cardImage)} alt={`${product.name} kidswear`} loading="lazy" onError={(e) => { e.currentTarget.src = '/assets/shop-banner.jpg' }} /></Link>
       <span className={`product-badge ${product.newArrival ? 'badge-pink' : ''}`}>{product.newArrival ? 'JUST IN' : product.discount + '% OFF'}</span>
       <button className={`heart-float ${saved ? 'is-saved' : ''}`} aria-label={saved ? `Remove ${product.name} from wishlist` : `Add ${product.name} to wishlist`} onClick={async () => { if (await dispatch({ type: 'toggleWish', id: product.id })) notify(saved ? 'Removed from your little favorites' : 'Saved to your little favorites') }}><Heart size={19} fill={saved ? 'currentColor' : 'none'} /></button>
       <button className="quick-add" onClick={() => setSizeOpen(!sizeOpen)}>{sizeOpen ? 'Choose a size' : <>Quick add <Plus size={15} /></>}</button>
-      {sizeOpen && <div className="size-popover"><div className="size-popover-title">Choose their size</div><div className="size-options">{product.sizes.map((option) => { const inStock = !product.variants?.length || (product.variants.find((variant) => variant.size === option && variant.color === product.colors[0])?.stock || 0) > 0; return <button key={option} disabled={!inStock} className={`${size === option ? 'size-selected' : ''} ${!inStock ? 'size-unavailable' : ''}`} onClick={() => setSize(option)}>{option}</button> })}</div><button className="popover-add" onClick={add}>Add to bag <ArrowRight size={14} /></button></div>}
+      {sizeOpen && <div className="size-popover"><div className="size-popover-title">Choose their size</div><div className="size-options">{product.sizes.map((option) => { const inStock = !product.variants?.length || (product.variants.find((variant) => variant.size === option && variant.color === (selectedColor || product.colors[0]))?.stock || 0) > 0; return <button key={option} disabled={!inStock} className={`${size === option ? 'size-selected' : ''} ${!inStock ? 'size-unavailable' : ''}`} onClick={() => setSize(option)}>{option}</button> })}</div><button className="popover-add" onClick={add}>Add to bag <ArrowRight size={14} /></button></div>}
     </div>
-    <div className="product-info"><div className="product-label">{product.category} · {product.subcategory}</div><Link to={`/product/${product.id}`} className="product-title">{product.name}</Link><div className="product-price"><b>{money(product.price)}</b><del>{money(product.originalPrice)}</del><span>{stars} <small>({product.reviews})</small></span></div></div>
+    <div className="product-info"><div className="product-label">{product.category} · {product.subcategory}</div><Link to={`/product/${product.id}`} className="product-title">{product.name}</Link>
+    {product.colors?.length > 1 && <div className="card-color-swatches">{product.colors.map((c) => <button key={c} type="button" className={`card-color-dot ${selectedColor === c ? 'is-active' : ''}`} style={{ backgroundColor: c.replace(/\s+/g, '').toLowerCase() }} title={c} aria-label={`View in ${c}`} onClick={(e) => { e.preventDefault(); setSelectedColor(c) }} />)}</div>}
+    <div className="product-price"><b>{money(product.price)}</b><del>{money(product.originalPrice)}</del><span>{stars} <small>({product.reviews})</small></span></div></div>
   </article>
 }
 
@@ -266,9 +273,11 @@ function ProductDetail() {
   const { id } = useParams(); const { products: catalog, dispatch, wishlist, notify } = useStore(); const product = catalog.find((p) => p.id === id)
   const navigate = useNavigate()
   const [size, setSize] = useState(''); const [color, setColor] = useState(product?.colors[0] || ''); const [quantity, setQuantity] = useState(1); const [open, setOpen] = useState('Product details'); const [error, setError] = useState(''); const [activeImageIndex, setActiveImageIndex] = useState(0)
-  useEffect(() => setActiveImageIndex(0), [id])
+  useEffect(() => setActiveImageIndex(0), [id, color])
   if (!product) return <NotFound />
-  const productImages = product.images?.length ? product.images : ['/assets/products/girl-01.jpg']
+  const currentColorEntry = product.colorImages?.find((ci) => ci.color?.toLowerCase()?.trim() === color?.toLowerCase()?.trim())
+  const colorSpecificImages = (currentColorEntry?.images || []).filter(Boolean)
+  const productImages = colorSpecificImages.length > 0 ? colorSpecificImages : (product.images?.length ? product.images : ['/assets/products/girl-01.jpg'])
   const activeImage = productImages[activeImageIndex] || productImages[0]
   const save = wishlist.includes(product.id)
   const selectedVariant = product.variants?.find((variant) => variant.size === size && variant.color === color)
@@ -277,9 +286,9 @@ function ProductDetail() {
   const sizeAvailable = (candidate) => !product.variants?.length || (product.variants.find((variant) => variant.size === candidate && variant.color === color)?.stock || 0) > 0
   const add = async () => { if (!size) { setError('Pick a size first so we can get the fit just right.'); return false }; if (selectedStock < quantity) { setError('That size and color is out of stock.'); return false }; setError(''); const saved=await dispatch({type:'add',item:{id:product.id,size,color,quantity}}); if(saved) notify(`${product.name} added to your bag`); return saved }
   return <main className="page-width detail-page"><Breadcrumbs items={[{label:'Shop',to:'/shop'},{label:product.name}]} /><div className="detail-grid"><div className="detail-gallery">
-      <div className="detail-main-image"><img src={mediaUrl(activeImage)} alt={product.name} onError={(event)=>{event.currentTarget.src='/assets/shop-banner.jpg'}} /><span className="product-badge badge-pink">{product.newArrival?'JUST IN':product.discount + '% OFF'}</span></div>
-      <div className="detail-thumbnails" role="group" aria-label={product.name + ' images'}>{productImages.map((image,index)=><button type="button" className={'detail-thumbnail ' + (index===activeImageIndex?'is-selected':'')} key={image + '-' + index} aria-label={'View image ' + (index + 1) + ' of ' + product.name} aria-pressed={index===activeImageIndex} onClick={()=>setActiveImageIndex(index)}><img src={mediaUrl(image)} alt="" loading="lazy" /></button>)}</div>
-      </div><div className="detail-info"><span className="eyebrow">{product.category} · {product.subcategory}</span><h1>{product.name}</h1><div className="detail-rating">{stars} <b>{product.rating}</b> <span>({product.reviews} happy reviews)</span></div><div className="detail-price"><b>{money(product.price)}</b><del>{money(product.originalPrice)}</del><span>{product.discount}% off</span></div><p className="detail-description">{product.description}</p><div className="choice-label">Color <b>{color}</b></div><div className="color-options">{product.colors.map((c)=><button disabled={!colorAvailable(c)} className={`color-dot ${color===c?'color-active':''} ${!colorAvailable(c)?'size-unavailable':''}`} style={{ backgroundColor: c.replace(/\s+/g, '').toLowerCase() }} key={c} aria-label={`Choose ${c}${colorAvailable(c)?'':' (out of stock)'}`} title={colorAvailable(c)?c:`${c} — out of stock`} onClick={()=>{setColor(c);if(size&&product.variants?.length&&!product.variants.some((variant)=>variant.size===size&&variant.color===c&&variant.stock>0))setSize('')}} />)}</div><div className="choice-label size-label">Choose size <Link to="/size-guide">Size guide <ArrowUpRight size={13} /></Link></div><div className="detail-sizes">{product.sizes.map((s)=><button key={s} disabled={!sizeAvailable(s)} className={`${size===s?'selected-size':''} ${!sizeAvailable(s)?'size-unavailable':''}`} onClick={()=>{setSize(s);setError('')}}>{s}</button>)}</div>{error&&<p className="form-error">{error}</p>}<div className="quantity-row"><span>Quantity</span><div className="quantity-stepper"><button aria-label="Decrease quantity" onClick={()=>setQuantity(Math.max(1,quantity-1))}><Minus size={14}/></button><span>{quantity}</span><button aria-label="Increase quantity" onClick={()=>setQuantity(Math.min(selectedStock,quantity+1))} disabled={quantity>=selectedStock}><Plus size={14}/></button></div></div><div className="detail-actions"><button className="button button-blue add-cart-button" onClick={add} disabled={Boolean(size && !selectedStock)}>Add to bag <ShoppingBag size={17} /></button><button className={`detail-wish ${save?'is-saved':''}`} aria-label={save?'Remove from wishlist':'Add to wishlist'} onClick={async()=>{if(await dispatch({type:'toggleWish',id:product.id}))notify(save?'Removed from your little favorites':'Saved to your little favorites')}}><Heart fill={save?'currentColor':'none'} /></button></div><button className="button button-outline buy-now" onClick={async()=>{if(size){if(await add())navigate('/checkout')}else setError('Pick a size first so we can get the fit just right.')}}>Buy now <ArrowRight size={16}/></button><div className="delivery-note"><Truck size={17}/><span>Comfy looks on the way. <b>Free delivery over ₹1,499.</b></span></div><div className="detail-accordions">{['Product details','Material & care','Size & fit','Delivery & returns'].map((item)=><div className={`accordion ${open===item?'accordion-open':''}`} key={item}><button onClick={()=>setOpen(open===item?'':item)}>{item}<ChevronDown size={16}/></button>{open===item&&<p>{item==='Product details'?product.description:item==='Material & care'?`${product.material}. Machine wash cold with like colors. Dry in shade for a little longer-lasting love.`:item==='Size & fit'?'True to size with an easy, comfortable fit. Between sizes? We recommend choosing the larger size.':'Ships from our Darbhanga store. Easy 7-day returns on unworn items with tags attached.'}</p>}</div>)}</div></div></div><section className="you-may-like"><div className="section-heading heading-row"><h2>You might also like</h2><Link className="text-arrow" to="/shop">See all <ArrowRight size={15}/></Link></div><div className="recommend-grid">{catalog.filter(p=>p.category===product.category&&p.id!==product.id).slice(0,4).map(p=><ProductCard key={p.id} product={p}/>)}</div></section></main>
+      <div className="detail-main-image"><img src={mediaUrl(activeImage)} alt={`${product.name} in ${color}`} onError={(event)=>{event.currentTarget.src='/assets/shop-banner.jpg'}} /><span className="product-badge badge-pink">{product.newArrival?'JUST IN':product.discount + '% OFF'}</span></div>
+      <div className="detail-thumbnails" role="group" aria-label={`${product.name} ${color} images`}>{productImages.map((image,index)=><button type="button" className={'detail-thumbnail ' + (index===activeImageIndex?'is-selected':'')} key={color + '-' + image + '-' + index} aria-label={'View image ' + (index + 1) + ' of ' + product.name + ' in ' + color} aria-pressed={index===activeImageIndex} onClick={()=>setActiveImageIndex(index)}><img src={mediaUrl(image)} alt="" loading="lazy" /></button>)}</div>
+      </div><div className="detail-info"><span className="eyebrow">{product.category} · {product.subcategory}</span><h1>{product.name}</h1><div className="detail-rating">{stars} <b>{product.rating}</b> <span>({product.reviews} happy reviews)</span></div><div className="detail-price"><b>{money(product.price)}</b><del>{money(product.originalPrice)}</del><span>{product.discount}% off</span></div><p className="detail-description">{product.description}</p><div className="choice-label">Color <b>{color}</b>{colorSpecificImages.length > 0 && <span className="color-images-indicator">✦ {colorSpecificImages.length} {colorSpecificImages.length === 1 ? 'photo' : 'photos'} in {color}</span>}</div><div className="color-options">{product.colors.map((c)=><button disabled={!colorAvailable(c)} className={`color-dot ${color===c?'color-active':''} ${!colorAvailable(c)?'size-unavailable':''}`} style={{ backgroundColor: c.replace(/\s+/g, '').toLowerCase() }} key={c} aria-label={`Choose ${c}${colorAvailable(c)?'':' (out of stock)'}`} title={colorAvailable(c)?c:`${c} — out of stock`} onClick={()=>{setColor(c);if(size&&product.variants?.length&&!product.variants.some((variant)=>variant.size===size&&variant.color===c&&variant.stock>0))setSize('')}} />)}</div><div className="choice-label size-label">Choose size <Link to="/size-guide">Size guide <ArrowUpRight size={13} /></Link></div><div className="detail-sizes">{product.sizes.map((s)=><button key={s} disabled={!sizeAvailable(s)} className={`${size===s?'selected-size':''} ${!sizeAvailable(s)?'size-unavailable':''}`} onClick={()=>{setSize(s);setError('')}}>{s}</button>)}</div>{error&&<p className="form-error">{error}</p>}<div className="quantity-row"><span>Quantity</span><div className="quantity-stepper"><button aria-label="Decrease quantity" onClick={()=>setQuantity(Math.max(1,quantity-1))}><Minus size={14}/></button><span>{quantity}</span><button aria-label="Increase quantity" onClick={()=>setQuantity(Math.min(selectedStock,quantity+1))} disabled={quantity>=selectedStock}><Plus size={14}/></button></div></div><div className="detail-actions"><button className="button button-blue add-cart-button" onClick={add} disabled={Boolean(size && !selectedStock)}>Add to bag <ShoppingBag size={17} /></button><button className={`detail-wish ${save?'is-saved':''}`} aria-label={save?'Remove from wishlist':'Add to wishlist'} onClick={async()=>{if(await dispatch({type:'toggleWish',id:product.id}))notify(save?'Removed from your little favorites':'Saved to your little favorites')}}><Heart fill={save?'currentColor':'none'} /></button></div><button className="button button-outline buy-now" onClick={async()=>{if(size){if(await add())navigate('/checkout')}else setError('Pick a size first so we can get the fit just right.')}}>Buy now <ArrowRight size={16}/></button><div className="delivery-note"><Truck size={17}/><span>Comfy looks on the way. <b>Free delivery over ₹1,499.</b></span></div><div className="detail-accordions">{['Product details','Material & care','Size & fit','Delivery & returns'].map((item)=><div className={`accordion ${open===item?'accordion-open':''}`} key={item}><button onClick={()=>setOpen(open===item?'':item)}>{item}<ChevronDown size={16}/></button>{open===item&&<p>{item==='Product details'?product.description:item==='Material & care'?`${product.material}. Machine wash cold with like colors. Dry in shade for a little longer-lasting love.`:item==='Size & fit'?'True to size with an easy, comfortable fit. Between sizes? We recommend choosing the larger size.':'Ships from our Darbhanga store. Easy 7-day returns on unworn items with tags attached.'}</p>}</div>)}</div></div></div><section className="you-may-like"><div className="section-heading heading-row"><h2>You might also like</h2><Link className="text-arrow" to="/shop">See all <ArrowRight size={15}/></Link></div><div className="recommend-grid">{catalog.filter(p=>p.category===product.category&&p.id!==product.id).slice(0,4).map(p=><ProductCard key={p.id} product={p}/>)}</div></section></main>
 }
 
 function Cart() {
@@ -294,75 +303,215 @@ function Wishlist() {
   return <main className="page-width saved-page"><Breadcrumbs items={[{label:'Little favorites'}]} /><div className="saved-heading"><span className="eyebrow">A COLLECTION OF THEIR YESSES</span><h1>Little favorites <span>♡</span></h1><p>All the lovely looks they’ve had their eye on.</p></div>{saved.length?<div className="shop-grid">{saved.map((p)=><ProductCard key={p.id} product={p}/>)}</div>:<div className="empty-bag"><div className="empty-star pink-star">♡</div><h2>Your little star hasn’t picked a favorite yet.</h2><p>When they do, you’ll find it right here.</p><Link to="/shop" className="button button-blue">Find their favourites <ArrowRight size={16}/></Link></div>}</main>
 }
 
+let razorpayScriptPromise = null
+function loadRazorpayScript() {
+  if (typeof window !== 'undefined' && window.Razorpay) return Promise.resolve(true)
+  if (!razorpayScriptPromise) {
+    razorpayScriptPromise = new Promise((resolve) => {
+      const existing = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]')
+      if (existing) {
+        existing.addEventListener('load', () => resolve(true), { once: true })
+        existing.addEventListener('error', () => { razorpayScriptPromise = null; resolve(false) }, { once: true })
+        return
+      }
+      const script = document.createElement('script')
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js'
+      script.async = true
+      script.onload = () => resolve(true)
+      script.onerror = () => { razorpayScriptPromise = null; resolve(false) }
+      document.body.appendChild(script)
+    })
+  }
+  return razorpayScriptPromise
+}
+
 function Checkout() {
-  const { cart, products, user, refreshCart } = useStore()
+  const { cart, products, user, refreshCart, refreshUser } = useStore()
   const [done, setDone] = useState(null)
   const [error, setError] = useState('')
-  if (!user) return <Navigate to="/login" />
   const [submitting, setSubmitting] = useState(false)
+  const [paymentStage, setPaymentStage] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('cod')
+  const [razorpayConfig, setRazorpayConfig] = useState({ loading: true, enabled: true, keyId: '' })
   const keyRef = useRef('')
-  const subtotal = cart.reduce((sum, line) => sum + (products.find((item) => item.id === line.id)?.price || 0) * line.quantity, 0)
+  const autofilledUserIdRef = useRef('')
+  const savedAddresses = user?.addresses || []
+
+  const [selectedAddressId, setSelectedAddressId] = useState('')
+  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
+  const [fullName, setFullName] = useState('')
+  const [line1, setLine1] = useState('')
+  const [city, setCity] = useState('')
+  const [postalCode, setPostalCode] = useState('')
+  const [landmark, setLandmark] = useState('')
+
+  useEffect(() => {
+    let active = true
+    api('/payment/razorpay/config')
+      .then((data) => {
+        if (!active) return
+        const enabled = Boolean(data?.enabled)
+        setRazorpayConfig({ loading: false, enabled, keyId: data?.keyId || '' })
+        if (!enabled) setPaymentMethod((prev) => (prev === 'razorpay' ? 'cod' : prev))
+      })
+      .catch(() => {
+        if (active) setRazorpayConfig({ loading: false, enabled: false, keyId: '' })
+      })
+    return () => { active = false }
+  }, [])
+
+  const applySavedAddress = useCallback((address) => {
+    if (!address) return
+    setSelectedAddressId(address._id || '')
+    setFullName(address.fullName || '')
+    if (address.phone) setPhone(address.phone)
+    setLine1(address.line1 || '')
+    setCity(address.city || '')
+    setPostalCode(address.postalCode || '')
+    setLandmark(address.landmark || '')
+  }, [])
+
+  useEffect(() => {
+    if (!user) {
+      autofilledUserIdRef.current = ''
+      return
+    }
+    const userId = user._id || user.id || user.email || 'user'
+    if (autofilledUserIdRef.current === userId) return
+    autofilledUserIdRef.current = userId
+    const addresses = user.addresses || []
+    const preferred = addresses.find((entry) => entry.isDefault) || addresses[addresses.length - 1]
+    setEmail(user.contactEmail || user.email || '')
+    setPhone(preferred?.phone || user.phone || '')
+    setFullName(preferred?.fullName || user.name || '')
+    if (preferred) {
+      setSelectedAddressId(preferred._id || '')
+      setLine1(preferred.line1 || '')
+      setCity(preferred.city || '')
+      setPostalCode(preferred.postalCode || '')
+      setLandmark(preferred.landmark || '')
+    }
+  }, [user])
+
+  if (!user) return <Navigate to="/login" />
+  const checkoutLines = cart.map((line) => ({ ...line, resolvedProduct: products.find((item) => item.id === line.id) || line.product }))
+  const subtotal = checkoutLines.reduce((sum, line) => sum + (line.resolvedProduct?.price || 0) * line.quantity, 0)
   const shipping = subtotal >= 1499 || subtotal === 0 ? 0 : 99
   const total = subtotal + shipping
   const onSubmit = async (event) => {
-    event.preventDefault(); setError(''); setSubmitting(true)
-    const values = new FormData(event.currentTarget)
+    event.preventDefault(); setError(''); setSubmitting(true); setPaymentStage('')
     if (!keyRef.current) keyRef.current = crypto.randomUUID ? crypto.randomUUID() : `web-${Date.now()}-${Math.random().toString(36).slice(2)}-retry`
     try {
-      const paymentMethod = values.get('payment')
-      const result = await api('/orders', { method: 'POST', headers: { 'Idempotency-Key': keyRef.current }, body: {
-        name: values.get('fullName'), email: values.get('email'), phone: values.get('phone'), paymentMethod,
-        address: { fullName: values.get('fullName'), line1: values.get('line1'), city: values.get('city'), postalCode: values.get('postalCode'), landmark: values.get('landmark') || '' },
-      } })
-      
-      if (paymentMethod === 'razorpay' && result.razorpayOrder) {
-        const loadScript = () => new Promise((resolve) => {
-          if (window.Razorpay) return resolve(true)
-          const script = document.createElement('script')
-          script.src = 'https://checkout.razorpay.com/v1/checkout.js'
-          script.onload = () => resolve(true)
-          script.onerror = () => resolve(false)
-          document.body.appendChild(script)
-        })
-        if (!(await loadScript())) throw new Error('Razorpay SDK failed to load. Are you offline?')
+      if (paymentMethod === 'razorpay') {
+        if (!razorpayConfig.loading && !razorpayConfig.enabled) {
+          throw new Error('Online payments via Razorpay are currently unavailable. Please choose Cash on Delivery.')
+        }
+        setPaymentStage('Loading Razorpay checkout…')
+        if (!(await loadRazorpayScript())) {
+          throw new Error('Razorpay checkout could not load. Check your internet connection or ad blocker and try again.')
+        }
+      }
 
+      setPaymentStage(paymentMethod === 'razorpay' ? 'Creating Razorpay order…' : '')
+      const result = await api('/orders', { method: 'POST', headers: { 'Idempotency-Key': keyRef.current }, body: {
+        name: fullName, email, phone, paymentMethod,
+        address: { fullName, line1, city, postalCode, landmark: landmark || '' },
+      } })
+
+      if (paymentMethod === 'razorpay') {
+        const key = result.razorpayKeyId || razorpayConfig.keyId || import.meta.env.VITE_RAZORPAY_KEY_ID
+        if (!result.razorpayOrder?.id || !key) {
+          throw new Error('Razorpay payment session could not be started. Please try again.')
+        }
+        let paymentSettled = false
+        let lastFailureReason = ''
+        const markAbandoned = async (reason) => {
+          try {
+            await api('/payment/razorpay/failure', { method: 'POST', body: { razorpay_order_id: result.razorpayOrder.id, reason } })
+          } catch {
+            // Keep UI recoverable even if cleanup request fails
+          }
+        }
         const options = {
-          key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_dummy',
+          key,
           amount: result.razorpayOrder.amount,
           currency: result.razorpayOrder.currency,
           name: 'Little Star Kids Wear',
-          description: 'Payment for your little star',
+          description: `Order ${result.order.orderNumber}`,
           order_id: result.razorpayOrder.id,
+          notes: { orderNumber: result.order.orderNumber },
           handler: async function (response) {
+            paymentSettled = true
+            setError('')
+            setPaymentStage('Verifying payment…')
             try {
-              await api('/payment/razorpay/verify', { method: 'POST', body: response })
-              setDone(result.order); keyRef.current = ''; await refreshCart(); window.scrollTo(0, 0)
-            } catch (err) { setError(err.message || 'Payment verification failed.') }
+              const verified = await api('/payment/razorpay/verify', { method: 'POST', body: response })
+              setDone(verified.order || result.order)
+              keyRef.current = ''
+              await Promise.all([refreshCart(), refreshUser()])
+              window.scrollTo(0, 0)
+            } catch (err) {
+              setError(err.message || 'Payment verification failed.')
+            } finally {
+              setSubmitting(false)
+              setPaymentStage('')
+            }
           },
-          prefill: { name: values.get('fullName'), email: values.get('email'), contact: values.get('phone') },
-          theme: { color: '#818cf8' }
+          modal: {
+            ondismiss: async function () {
+              if (paymentSettled) return
+              paymentSettled = true
+              await markAbandoned(lastFailureReason || 'Payment cancelled by customer')
+              keyRef.current = ''
+              setSubmitting(false)
+              setPaymentStage('')
+              setError(lastFailureReason
+                ? `${lastFailureReason}. Your bag items are still saved—try again or choose Cash on Delivery.`
+                : 'Payment was cancelled. Your bag items are still saved—try again or choose Cash on Delivery.')
+            },
+          },
+          prefill: { name: fullName, email, contact: phone.replace(/[^\d+]/g, '') },
+          theme: { color: '#3b4a9a' },
         }
+        setPaymentStage('Complete payment in Razorpay…')
         const paymentObject = new window.Razorpay(options)
-        paymentObject.on('payment.failed', function () { setError('Payment failed. Please try again.') })
+        paymentObject.on('payment.failed', function (failureEvent) {
+          lastFailureReason = failureEvent?.error?.description || failureEvent?.error?.reason || 'Payment failed'
+          setError(`${lastFailureReason}. You can retry inside Razorpay or close the popup to switch payment method.`)
+        })
         paymentObject.open()
-      } else {
-        setDone(result.order); keyRef.current = ''; await refreshCart(); window.scrollTo(0, 0)
+        return
       }
-    } catch (submitError) { setError(submitError.message || 'We couldn’t place the order. Please try again.') }
-    finally { setSubmitting(false) }
+
+      setDone(result.order); keyRef.current = ''; await Promise.all([refreshCart(), refreshUser()]); window.scrollTo(0, 0)
+      setSubmitting(false)
+      setPaymentStage('')
+    } catch (submitError) {
+      setError(submitError.message || 'We couldn’t place the order. Please try again.')
+      setSubmitting(false)
+      setPaymentStage('')
+    }
   }
-  if (done) return <main className="success-page page-width"><div className="success-orbit"><span>✦</span><Check size={38}/></div><span className="eyebrow">A LITTLE JOY IS ON ITS WAY</span><h1>Yay! Order placed! <span>🎉</span></h1><p>Your little star’s new outfit is on the way.</p><div className="order-id">Your order number <b>{done.orderNumber}</b></div><Link className="button button-blue" to={user ? '/orders' : '/shop'}>{user ? 'See your order' : 'Keep discovering'} <ArrowRight size={16}/></Link></main>
+  const submitLabel = submitting
+    ? (paymentStage || 'Placing order…')
+    : (paymentMethod === 'razorpay' ? 'Pay & place order' : 'Place your order')
+  if (done) return <main className="success-page page-width"><div className="success-orbit"><span>✦</span><Check size={38}/></div><span className="eyebrow">A LITTLE JOY IS ON ITS WAY</span><h1>Yay! Order placed! <span>🎉</span></h1><p>Your little star’s new outfit is on the way.</p><div className="order-id">Your order number <b>{done.orderNumber}</b></div><p style={{ marginTop: '-10px', marginBottom: '20px', fontSize: '0.92rem', color: 'var(--ink-soft)' }}>{done.paymentMethod === 'razorpay' ? `Paid online via Razorpay${done.razorpayPaymentId ? ` · ${done.razorpayPaymentId}` : ''}` : 'Cash on delivery'}</p><Link className="button button-blue" to={user ? '/orders' : '/shop'}>{user ? 'See your order' : 'Keep discovering'} <ArrowRight size={16}/></Link></main>
   if (!cart.length) return <main className="page-width checkout-empty"><div className="empty-bag"><div className="empty-star"><ShoppingBag size={34}/></div><h2>Your bag is waiting for a little something.</h2><p>Find an outfit for the next big adventure.</p><Link className="button button-blue" to="/shop">Explore the collection <ArrowRight size={16}/></Link></div></main>
   return <main className="page-width checkout-page"><Breadcrumbs items={[{label:'Your bag',to:'/cart'},{label:'Checkout'}]} /><div className="checkout-head"><span className="eyebrow">THE LAST LITTLE STEP</span><h1>Let’s get it to you.</h1><p>We’ll keep checkout simple and secure.</p></div><div className="checkout-grid"><form id="checkout-form" className="checkout-form" onSubmit={onSubmit}>
-    <section className="checkout-block"><div className="checkout-step"><span>01</span><div><h2>Contact</h2><p>Where can we reach you?</p></div></div><div className="field-grid"><label>Email address<input type="email" name="email" required placeholder="you@example.com" /></label><label>Phone number<input type="tel" name="phone" required minLength="10" pattern="(?:\+|[0-9])(?:[0-9]| |-|\(|\)){8,16}[0-9]" placeholder="+91 98765 43210" /></label></div></section>
-    <section className="checkout-block"><div className="checkout-step"><span>02</span><div><h2>Delivery address</h2><p>Where should their new favourite go?</p></div></div><div className="field-grid"><label className="field-wide">Full name<input name="fullName" required pattern=".*\S.*" placeholder="Your name" /></label><label className="field-wide">Address<input name="line1" required pattern=".*\S.*" placeholder="House no., street, locality" /></label><label>City<input name="city" required pattern=".*\S.*" placeholder="Darbhanga" /></label><label>PIN code<input name="postalCode" required pattern="[0-9]{6}" placeholder="846001" /></label><label className="field-wide">Landmark <small>(optional)</small><input name="landmark" placeholder="Nearby landmark" /></label></div></section>
+    <section className="checkout-block"><div className="checkout-step"><span>01</span><div><h2>Contact</h2><p>Where can we reach you?</p></div></div><div className="field-grid"><label>Email address<input type="email" name="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" /></label><label>Phone number<input type="tel" name="phone" required minLength="10" pattern="(?:\+|[0-9])(?:[0-9]| |-|\(|\)){8,16}[0-9]" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98765 43210" autoComplete="tel" /></label></div></section>
+    <section className="checkout-block"><div className="checkout-step"><span>02</span><div><h2>Delivery address</h2><p>Where should their new favourite go?</p></div></div>{savedAddresses.length > 0 && <div className="saved-address-picker" role="group" aria-label="Saved addresses">{savedAddresses.map((addr) => <button type="button" key={addr._id} className={`saved-address-chip ${selectedAddressId === addr._id ? 'is-selected' : ''}`} onClick={() => applySavedAddress(addr)}><b>{addr.label || 'Saved'}</b><span>{addr.line1}, {addr.city} {addr.postalCode}</span></button>)}</div>}<div className="field-grid"><label className="field-wide">Full name<input name="fullName" required pattern=".*\S.*" value={fullName} onChange={(e) => { setSelectedAddressId(''); setFullName(e.target.value) }} placeholder="Your name" autoComplete="name" /></label><label className="field-wide">Address<input name="line1" required pattern=".*\S.*" value={line1} onChange={(e) => { setSelectedAddressId(''); setLine1(e.target.value) }} placeholder="House no., street, locality" autoComplete="street-address" /></label><label>City<input name="city" required pattern=".*\S.*" value={city} onChange={(e) => { setSelectedAddressId(''); setCity(e.target.value) }} placeholder="Darbhanga" autoComplete="address-level2" /></label><label>PIN code<input name="postalCode" required pattern="[0-9]{6}" value={postalCode} onChange={(e) => { setSelectedAddressId(''); setPostalCode(e.target.value) }} placeholder="846001" autoComplete="postal-code" /></label><label className="field-wide">Landmark <small>(optional)</small><input name="landmark" value={landmark} onChange={(e) => { setSelectedAddressId(''); setLandmark(e.target.value) }} placeholder="Nearby landmark" /></label></div></section>
     <section className="checkout-block"><div className="checkout-step"><span>03</span><div><h2>Delivery method</h2><p>One happy package, coming up.</p></div></div><label className="option-card"><input type="radio" name="delivery" defaultChecked /><span className="option-icon"><Truck size={17}/></span><span><b>Standard delivery</b><small>3–5 working days</small></span><b className="option-price">{shipping ? money(shipping) : 'Free'}</b></label></section>
-    <section className="checkout-block"><div className="checkout-step"><span>04</span><div><h2>Payment method</h2><p>Choose what feels easy.</p></div></div><label className="option-card"><input type="radio" name="payment" value="cod" defaultChecked /><span className="option-icon"><PackageCheck size={17}/></span><span><b>Cash on delivery</b><small>Pay when your package arrives</small></span></label><label className="option-card"><input type="radio" name="payment" value="razorpay" /><span className="option-icon"><CreditCard size={17}/></span><span><b>Razorpay (UPI / Cards)</b><small>Pay securely online</small></span></label></section>
-    {error && <p className="form-error" role="alert">{error}</p>}<button type="submit" className="button button-blue place-order-mobile" disabled={submitting}>{submitting ? 'Placing order…' : 'Place your order'} <ArrowRight size={16}/></button></form>
-    <aside className="order-card checkout-summary"><span className="eyebrow">YOUR LITTLE PICKS</span><h2>Order summary</h2>{cart.map((line)=>{const p=products.find((item)=>item.id===line.id) || line.product;return p&&<div className="checkout-item" key={cartLineKey(line)}><img src={mediaUrl(p.images?.[0]) || '/assets/products/girl-01.jpg'} alt=""/><div><b>{p.name}</b><small>Size {line.size} · Qty {line.quantity}</small></div><span>{money(p.price*line.quantity)}</span></div>})}<div className="summary-line"><span>Subtotal</span><b>{money(subtotal)}</b></div><div className="summary-line"><span>Delivery</span><b>{shipping ? money(shipping) : 'Free'}</b></div><div className="summary-total"><span>Total</span><b>{money(total)}</b></div><button form="checkout-form" className="button button-blue full-button" type="submit" disabled={submitting}>{submitting ? 'Placing order…' : 'Place your order'} <ArrowRight size={16}/></button><div className="secure-note"><LockKeyhole size={14}/> Secure checkout, happy little hearts</div></aside></div></main>
+    <section className="checkout-block"><div className="checkout-step"><span>04</span><div><h2>Payment method</h2><p>Choose what feels easy.</p></div></div><label className="option-card"><input type="radio" name="payment" value="cod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} /><span className="option-icon"><PackageCheck size={17}/></span><span><b>Cash on delivery</b><small>Pay when your package arrives</small></span></label><label className={`option-card ${!razorpayConfig.loading && !razorpayConfig.enabled ? 'payment-unavailable' : ''}`}><input type="radio" name="payment" value="razorpay" checked={paymentMethod === 'razorpay'} disabled={!razorpayConfig.loading && !razorpayConfig.enabled} onChange={() => setPaymentMethod('razorpay')} /><span className="option-icon"><CreditCard size={17}/></span><span><b>Razorpay (UPI / Cards / NetBanking)</b><small>{!razorpayConfig.loading && !razorpayConfig.enabled ? 'Configure RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET on backend' : 'Pay securely online via Razorpay'}</small></span></label></section>
+    {error && <p className="form-error" role="alert">{error}</p>}<button type="submit" className="button button-blue place-order-mobile" disabled={submitting}>{submitLabel} <ArrowRight size={16}/></button></form>
+    <aside className="order-card checkout-summary"><span className="eyebrow">YOUR LITTLE PICKS</span><h2>Order summary</h2>{checkoutLines.map((line)=>{const p=line.resolvedProduct;return p&&<div className="checkout-item" key={cartLineKey(line)}><img src={mediaUrl(p.images?.[0]) || '/assets/products/girl-01.jpg'} alt=""/><div><b>{p.name}</b><small>Size {line.size} · Qty {line.quantity}</small></div><span>{money(p.price*line.quantity)}</span></div>})}<div className="summary-line"><span>Subtotal</span><b>{money(subtotal)}</b></div><div className="summary-line"><span>Delivery</span><b>{shipping ? money(shipping) : 'Free'}</b></div><div className="summary-total"><span>Total</span><b>{money(total)}</b></div><button form="checkout-form" className="button button-blue full-button" type="submit" disabled={submitting}>{submitLabel} <ArrowRight size={16}/></button><div className="secure-note"><LockKeyhole size={14}/> Secure checkout, happy little hearts</div></aside></div></main>
 }
 function AuthPage({ register = false }) {
-  const { login, googleLogin } = useStore(); const nav = useNavigate(); const [error, setError] = useState(''); const [busy, setBusy] = useState(false)
+  const { login, googleLogin } = useStore()
+  const nav = useNavigate()
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
   const onSubmit = async (event) => {
     event.preventDefault(); setError(''); setBusy(true)
     const data = new FormData(event.currentTarget)
@@ -372,6 +521,7 @@ function AuthPage({ register = false }) {
     } catch (requestError) { setError(requestError.message || 'We couldn’t sign you in. Please try again.') }
     finally { setBusy(false) }
   }
+
   const onGoogleSuccess = async (credentialResponse) => {
     setError(''); setBusy(true)
     try {
@@ -380,13 +530,187 @@ function AuthPage({ register = false }) {
     } catch (requestError) { setError(requestError.message || 'Google sign in failed.') }
     finally { setBusy(false) }
   }
-  return <main className="auth-page page-width"><div className="auth-art"><div className="auth-art-circle"><Star size={82} fill="currentColor"/></div><span className="eyebrow light-eyebrow">A LITTLE HELLO</span><h2>{register?'New here?':'Good to see you.'}<br/><em>{register?'Let’s get cozy.':'Welcome back.'}</em></h2><p>Your little star’s happy place for all things comfy and cute.</p><span className="auth-art-note">Little style.<br/>Big dreams. ♡</span></div><div className="auth-form-panel"><BrandMark/><span className="eyebrow">{register?'START YOUR LITTLE STAR ACCOUNT':'COME ON IN'}</span><h1>{register?'Create an account':'Welcome back'}</h1><p>{register?'Save favorites and keep all their little looks together.':'Sign in to find your saved looks and orders.'}</p><form onSubmit={onSubmit}>{register&&<label>Your name<input name="name" required minLength="2" pattern=".*\S.*" placeholder="Your name" autoComplete="name"/></label>}<label>Email address<input type="email" name="email" required placeholder="you@example.com" autoComplete="email"/></label><label>Password<input type="password" name="password" required minLength="8" maxLength="72" placeholder={register ? '8 or more characters' : 'Your password'} autoComplete={register?'new-password':'current-password'}/></label>{error&&<p className="form-error" role="alert">{error}</p>}<button className="button button-blue full-button" disabled={busy}>{busy ? 'Please wait…' : register ? 'Create account' : 'Sign in'} <ArrowRight size={16}/></button></form><div style={{ display: 'flex', justifyContent: 'center', marginTop: '1.5rem' }}><GoogleLogin onSuccess={onGoogleSuccess} onError={()=>setError('Google sign in was unsuccessful.')} useOneTap={!register}/></div><div className="auth-switch">{register?'Already have an account?':'New to Little Star?'} <Link to={register?'/login':'/register'}>{register?'Sign in':'Create an account'}</Link></div><p className="mock-note"><LockKeyhole size={13}/> Your account is protected with secure sign-in.</p></div></main>
+
+  return (
+    <main className="auth-page page-width">
+      <div className="auth-art">
+        <div className="auth-art-circle"><Star size={82} fill="currentColor"/></div>
+        <span className="eyebrow light-eyebrow">A LITTLE HELLO</span>
+        <h2>{register ? 'New here?' : 'Good to see you.'}<br/><em>{register ? 'Let’s get cozy.' : 'Welcome back.'}</em></h2>
+        <p>Your little star’s happy place for all things comfy and cute.</p>
+        <span className="auth-art-note">Little style.<br/>Big dreams. ♡</span>
+      </div>
+
+      <div className="auth-form-panel">
+        <BrandMark/>
+        <span className="eyebrow">{register ? 'START YOUR LITTLE STAR ACCOUNT' : 'COME ON IN'}</span>
+        <h1>{register ? 'Create an account' : 'Welcome back'}</h1>
+        <p>{register ? 'Save favorites and keep all their little looks together.' : 'Sign in to find your saved looks and orders.'}</p>
+
+        <form onSubmit={onSubmit}>
+          {register && <label>Your name<input name="name" required minLength="2" pattern=".*\S.*" placeholder="Your name" autoComplete="name"/></label>}
+          <label>Email address<input type="email" name="email" required placeholder="you@example.com" autoComplete="email"/></label>
+          <label>Password<input type="password" name="password" required minLength="8" maxLength="72" placeholder={register ? '8 or more characters' : 'Your password'} autoComplete={register ? 'new-password' : 'current-password'}/></label>
+          {error && <p className="form-error" role="alert">{error}</p>}
+          <button className="button button-blue full-button" disabled={busy}>{busy ? 'Please wait…' : register ? 'Create account' : 'Sign in'} <ArrowRight size={16}/></button>
+        </form>
+
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1.25rem' }}>
+          <GoogleLogin onSuccess={onGoogleSuccess} onError={() => setError('Google sign in was unsuccessful.')}/>
+        </div>
+
+        <div className="auth-switch">
+          {register ? 'Already have an account?' : 'New to Little Star?'} <Link to={register ? '/login' : '/register'}>{register ? 'Sign in' : 'Create an account'}</Link>
+        </div>
+        <p className="mock-note"><LockKeyhole size={13}/> Your account is protected with secure sign-in.</p>
+      </div>
+    </main>
+  )
 }
 
 function Account() {
-  const { user, logout } = useStore(); const name = user?.name || 'Little Star grown-up'; const [error, setError] = useState('')
+  const { user, logout, refreshUser, notify } = useStore()
+  const name = user?.name || 'Little Star grown-up'
+  const [error, setError] = useState('')
+  const [profileName, setProfileName] = useState('')
+  const [contactEmail, setContactEmail] = useState('')
+  const [phone, setPhone] = useState('')
+  const [savingProfile, setSavingProfile] = useState(false)
+  const [showAddressForm, setShowAddressForm] = useState(false)
+  const [addrLabel, setAddrLabel] = useState('Home')
+  const [addrName, setAddrName] = useState('')
+  const [addrPhone, setAddrPhone] = useState('')
+  const [addrLine1, setAddrLine1] = useState('')
+  const [addrCity, setAddrCity] = useState('')
+  const [addrPostalCode, setAddrPostalCode] = useState('')
+  const [addrLandmark, setAddrLandmark] = useState('')
+  const [savingAddr, setSavingAddr] = useState(false)
+
+  useEffect(() => {
+    if (!user) return
+    setProfileName(user.name || '')
+    setContactEmail(user.contactEmail || user.email || '')
+    setPhone(user.phone || '')
+    setAddrName(user.name || '')
+    setAddrPhone(user.phone || '')
+  }, [user])
+
   const signOut = async () => { try { await logout(); setError('') } catch (requestError) { setError(requestError.message) } }
-  return <main className="page-width account-page"><Breadcrumbs items={[{label:'My account'}]} /><div className="account-welcome"><span className="eyebrow">A HOME FOR ALL THEIR LITTLE LOOKS</span><h1>Hello, {name} <span>♡</span></h1><p>Here’s everything for your little star, all in one place.</p></div><div className="account-grid"><Link to="/orders" className="account-tile"><span><ClipboardList/></span><b>My orders</b><small>All the little packages on their way</small><ArrowRight/></Link><Link to="/wishlist" className="account-tile"><span><Heart/></span><b>Little favorites</b><small>Looks they’ve saved for later</small><ArrowRight/></Link><Link to="/size-guide" className="account-tile"><span><Shirt/></span><b>Size guide</b><small>Find their just-right fit</small><ArrowRight/></Link><Link to="/contact" className="account-tile"><span><MapPin/></span><b>Addresses & help</b><small>We’re always happy to help</small><ArrowRight/></Link></div><div className="account-bottom"><div><span className="eyebrow">YOUR LITTLE STAR PROFILE</span><p>{user?.email||'Sign in to keep your profile and orders together.'}</p></div>{user?<button className="button button-outline" onClick={signOut}>Sign out <ArrowRight size={14}/></button>:<Link className="button button-blue" to="/login">Sign in / Register <ArrowRight size={14}/></Link>}</div>{error&&<p className="form-error" role="alert">{error}</p>}</main>
+
+  const saveContact = async (event) => {
+    event.preventDefault(); setError(''); setSavingProfile(true)
+    try {
+      await api('/auth/me', { method: 'PUT', body: { name: profileName, contactEmail, phone } })
+      await refreshUser()
+      notify('Contact details saved.')
+    } catch (requestError) {
+      setError(requestError.message || 'Could not save contact details.')
+    } finally {
+      setSavingProfile(false)
+    }
+  }
+
+  const saveAddress = async (event) => {
+    event.preventDefault(); setError(''); setSavingAddr(true)
+    try {
+      await api('/auth/addresses', {
+        method: 'POST',
+        body: { label: addrLabel, fullName: addrName, phone: addrPhone, line1: addrLine1, city: addrCity, postalCode: addrPostalCode, landmark: addrLandmark, isDefault: true }
+      })
+      await refreshUser()
+      setAddrLine1(''); setAddrCity(''); setAddrPostalCode(''); setAddrLandmark(''); setShowAddressForm(false)
+      notify('Delivery address saved.')
+    } catch (requestError) {
+      setError(requestError.message || 'Could not save delivery address.')
+    } finally {
+      setSavingAddr(false)
+    }
+  }
+
+  const setDefaultAddress = async (addressId) => {
+    setError('')
+    try {
+      await api(`/auth/addresses/${addressId}/default`, { method: 'PUT' })
+      await refreshUser()
+      notify('Default address updated.')
+    } catch (requestError) { setError(requestError.message) }
+  }
+
+  const removeAddress = async (addressId) => {
+    setError('')
+    try {
+      await api(`/auth/addresses/${addressId}`, { method: 'DELETE' })
+      await refreshUser()
+      notify('Address removed.')
+    } catch (requestError) { setError(requestError.message) }
+  }
+
+  const contactDisplay = user?.phone ? `+91 ${user.phone}` : (user?.contactEmail || (user?.email && !user.email.endsWith('@phone.littlestar.local') ? user.email : 'Little Star Family'))
+  const addresses = user?.addresses || []
+
+  return <main className="page-width account-page"><Breadcrumbs items={[{label:'My account'}]} /><div className="account-welcome"><span className="eyebrow">A HOME FOR ALL THEIR LITTLE LOOKS</span><h1>Hello, {name} <span>♡</span></h1><p>Here’s everything for your little star, all in one place.</p></div><div className="account-grid"><Link to="/orders" className="account-tile"><span><ClipboardList/></span><b>My orders</b><small>All the little packages on their way</small><ArrowRight/></Link><Link to="/wishlist" className="account-tile"><span><Heart/></span><b>Little favorites</b><small>Looks they’ve saved for later</small><ArrowRight/></Link><Link to="/size-guide" className="account-tile"><span><Shirt/></span><b>Size guide</b><small>Find their just-right fit</small><ArrowRight/></Link><Link to="/contact" className="account-tile"><span><MapPin/></span><b>Addresses & help</b><small>We’re always happy to help</small><ArrowRight/></Link></div>
+    {user && <div className="account-saved-grid">
+      <section className="checkout-block">
+        <div className="checkout-step"><span>01</span><div><h2>Saved contact details</h2><p>Autofilled automatically at checkout.</p></div></div>
+        <form className="checkout-form" onSubmit={saveContact}>
+          <div className="field-grid">
+            <label className="field-wide">Full name<input required minLength="2" value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="Your name" /></label>
+            <label>Contact email<input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="you@example.com" /></label>
+            <label>Phone number<input type="tel" minLength="10" pattern="(?:\+|[0-9])(?:[0-9]| |-|\(|\)){8,16}[0-9]" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98765 43210" /></label>
+          </div>
+          <button type="submit" className="button button-blue" style={{ marginTop: '14px' }} disabled={savingProfile}>{savingProfile ? 'Saving…' : 'Save contact details'}</button>
+        </form>
+      </section>
+
+      <section className="checkout-block">
+        <div className="checkout-step" style={{ justifyContent: 'space-between', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+            <span className="account-step-badge">02</span>
+            <div><h2>Saved delivery addresses</h2><p>Used to pre-fill your shipping details.</p></div>
+          </div>
+          <button type="button" className="button button-outline" onClick={() => setShowAddressForm((v) => !v)}>{showAddressForm ? 'Cancel' : 'Add address'}</button>
+        </div>
+
+        {showAddressForm && (
+          <form className="checkout-form" onSubmit={saveAddress} style={{ marginBottom: '16px' }}>
+            <div className="field-grid">
+              <label>Label<input value={addrLabel} onChange={(e) => setAddrLabel(e.target.value)} placeholder="Home / Work" /></label>
+              <label>Phone<input type="tel" required minLength="10" pattern="(?:\+|[0-9])(?:[0-9]| |-|\(|\)){8,16}[0-9]" value={addrPhone} onChange={(e) => setAddrPhone(e.target.value)} placeholder="+91 98765 43210" /></label>
+              <label className="field-wide">Full name<input required pattern=".*\S.*" value={addrName} onChange={(e) => setAddrName(e.target.value)} placeholder="Recipient name" /></label>
+              <label className="field-wide">Address<input required pattern=".*\S.*" value={addrLine1} onChange={(e) => setAddrLine1(e.target.value)} placeholder="House no., street, locality" /></label>
+              <label>City<input required pattern=".*\S.*" value={addrCity} onChange={(e) => setAddrCity(e.target.value)} placeholder="Darbhanga" /></label>
+              <label>PIN code<input required pattern="[0-9]{6}" value={addrPostalCode} onChange={(e) => setAddrPostalCode(e.target.value)} placeholder="846001" /></label>
+              <label className="field-wide">Landmark <small>(optional)</small><input value={addrLandmark} onChange={(e) => setAddrLandmark(e.target.value)} placeholder="Nearby landmark" /></label>
+            </div>
+            <button type="submit" className="button button-blue" style={{ marginTop: '14px' }} disabled={savingAddr}>{savingAddr ? 'Saving…' : 'Save address'}</button>
+          </form>
+        )}
+
+        {addresses.length ? (
+          <div className="saved-address-list">
+            {addresses.map((addr) => (
+              <div className={`saved-address-item ${addr.isDefault ? 'is-default' : ''}`} key={addr._id}>
+                <div>
+                  <div className="saved-address-title">
+                    <b>{addr.label || 'Home'} · {addr.fullName}</b>
+                    {addr.isDefault && <span className="saved-default-tag">Default</span>}
+                  </div>
+                  <p>{addr.line1}{addr.landmark ? `, ${addr.landmark}` : ''}, {addr.city} - {addr.postalCode}</p>
+                  <small>Phone: {addr.phone}</small>
+                </div>
+                <div className="saved-address-actions">
+                  {!addr.isDefault && <button type="button" className="saved-address-default-btn" onClick={() => setDefaultAddress(addr._id)}>Set default</button>}
+                  <button type="button" className="remove-item" aria-label="Remove address" onClick={() => removeAddress(addr._id)}><Trash2 size={15}/></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="saved-address-empty">No saved addresses yet. Add one here or place an order to save it automatically.</p>
+        )}
+      </section>
+    </div>}
+    <div className="account-bottom"><div><span className="eyebrow">YOUR LITTLE STAR PROFILE</span><p>{contactDisplay}</p></div>{user?<button className="button button-outline" onClick={signOut}>Sign out <ArrowRight size={14}/></button>:<Link className="button button-blue" to="/login">Sign in / Register <ArrowRight size={14}/></Link>}</div>{error&&<p className="form-error" role="alert">{error}</p>}</main>
 }
 
 function Orders() {
@@ -398,7 +722,7 @@ function Orders() {
     return () => { active = false }
   }, [user])
   const statusLabel = (status) => !status ? 'Unknown' : status === 'confirmed' ? 'Processing' : status.charAt(0).toUpperCase() + status.slice(1)
-  return <main className="page-width orders-page"><Breadcrumbs items={[{label:'My account',to:'/account'},{label:'My orders'}]} /><div className="account-welcome"><span className="eyebrow">A LITTLE UPDATE</span><h1>Orders & adventures.</h1><p>Here’s a peek at the happy things coming your way.</p></div>{!user ? <div className="empty-bag"><h2>Sign in to see your orders.</h2><Link to="/login" className="button button-blue">Sign in <ArrowRight size={16}/></Link></div> : loading ? <p role="status">Loading your orders…</p> : error ? <p className="form-error" role="alert">{error}</p> : orders.length ? <div className="orders-list">{orders.map((order)=>{const item=order.items?.[0];return <article className="order-history-card" key={order._id}><div className="order-hist-top"><div><span className="eyebrow">ORDER PLACED · {new Date(order.createdAt).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</span><h3>{order.orderNumber}</h3></div><span className={`status-pill status-${order.orderStatus}`}><span/>{statusLabel(order.orderStatus)}</span></div><div className="order-hist-content"><div className="order-mini-photo">{item?.image&&<img src={mediaUrl(item.image)} alt=""/>}</div><div><b>{item?.name || `${order.items?.length || 0} items`}{order.items?.length > 1 ? ` + ${order.items.length - 1} more` : ''}</b><small>{item ? `Size ${item.size} · ${item.color} · Qty ${item.quantity}` : 'Little Star Kids Wear'}</small></div><div className="order-total-small"><small>Order total</small><b>{money(order.total)}</b></div><Link to="/contact" className="button button-outline">Order help <ArrowRight size={14}/></Link></div></article>})}</div> : <div className="empty-bag"><h2>No orders yet.</h2><p>Your next little adventure starts with the collection.</p><Link to="/shop" className="button button-blue">Explore the collection <ArrowRight size={16}/></Link></div>}</main>
+  return <main className="page-width orders-page"><Breadcrumbs items={[{label:'My account',to:'/account'},{label:'My orders'}]} /><div className="account-welcome"><span className="eyebrow">A LITTLE UPDATE</span><h1>Orders & adventures.</h1><p>Here’s a peek at the happy things coming your way.</p></div>{!user ? <div className="empty-bag"><h2>Sign in to see your orders.</h2><Link to="/login" className="button button-blue">Sign in <ArrowRight size={16}/></Link></div> : loading ? <p role="status">Loading your orders…</p> : error ? <p className="form-error" role="alert">{error}</p> : orders.length ? <div className="orders-list">{orders.map((order)=>{const item=order.items?.[0];return <article className="order-history-card" key={order._id}><div className="order-hist-top"><div><span className="eyebrow">ORDER PLACED · {new Date(order.createdAt).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</span><h3>{order.orderNumber}</h3></div><span className={`status-pill status-${order.orderStatus}`}><span/>{statusLabel(order.orderStatus)}</span></div><div className="order-hist-content"><div className="order-mini-photo">{item?.image&&<img src={mediaUrl(item.image)} alt=""/>}</div><div><b>{item?.name || `${order.items?.length || 0} items`}{order.items?.length > 1 ? ` + ${order.items.length - 1} more` : ''}</b><small>{item ? `Size ${item.size} · ${item.color} · Qty ${item.quantity}` : 'Little Star Kids Wear'}</small></div><div className="order-total-small"><small>{order.paymentMethod === 'razorpay' ? `Razorpay · ${order.paymentStatus}` : `COD · ${order.paymentStatus}`}</small><b>{money(order.total)}</b></div><Link to="/contact" className="button button-outline">Order help <ArrowRight size={14}/></Link></div></article>})}</div> : <div className="empty-bag"><h2>No orders yet.</h2><p>Your next little adventure starts with the collection.</p><Link to="/shop" className="button button-blue">Explore the collection <ArrowRight size={16}/></Link></div>}</main>
 }
 function About() {
   return <main className="about-page"><section className="about-hero page-width"><div className="about-title"><span className="eyebrow">OUR LITTLE STORY</span><h1>Every child<br />deserves to <em>shine.</em></h1><p>Little Star is a happy corner for big imaginations, soft fabrics and the everyday magic of growing up.</p><Link className="button button-blue" to="/shop">Meet the collection <ArrowRight size={16}/></Link></div><div className="about-image"><img src={imageUrl('photo-1503454537195-1dcabb73ffb9',1100)} alt="A happy child in a playful outfit"/><span>Little people.<br/>Big light. ✦</span></div></section><section className="about-story page-width"><div className="story-note"><span className="eyebrow">A NOTE FROM OUR LITTLE CORNER</span><h2>Good clothes make room for more play.</h2></div><div className="story-copy"><p>Little Star Kids Wear began with a simple thought: the clothes children live in should feel as lovely as the memories they make in them. So we look for soft, easy pieces with a little bit of personality — the ones they reach for on the big days and the ordinary, wonderful ones too.</p><p>From our home in Zero Mile, Darbhanga, we bring together playful kidswear for ages 0–15. We care about comfort, quality and making it easy for grown-ups to find something that feels just right.</p><Link to="/contact" className="text-arrow">Say hello <ArrowRight size={15}/></Link></div></section><div className="about-values page-width"><div><span>01</span><h3>Kids come first</h3><p>Room to wriggle, run, explore and be exactly who they are.</p></div><div><span>02</span><h3>Comfort is a love language</h3><p>Soft, breathable materials and easy fits for busy little days.</p></div><div><span>03</span><h3>Thoughtfully picked</h3><p>Styles that feel special without being too precious to play in.</p></div></div><section className="about-location page-width"><MapPin/><div><span className="eyebrow">COME FIND US</span><h2>A little star on the map.</h2><p>Zero Mile, Dumri, Biraul, Darbhanga</p></div><a className="button button-outline" href="https://maps.google.com/?q=Zero+Mile+Dumri+Biraul+Darbhanga" target="_blank" rel="noreferrer">Get directions <ArrowUpRight size={15}/></a></section></main>
@@ -415,6 +739,59 @@ function SizeGuide() {
   return <main className="page-width size-guide-page"><Breadcrumbs items={[{label:'Size guide'}]} /><div className="size-guide-heading"><div><span className="eyebrow">A COMFY FIT, EVERY TIME</span><h1>Find their just-right size.</h1><p>Little bodies grow fast. Here’s a simple guide to help.</p></div><div className="measuring-doodle"><Shirt size={54}/><span>♡</span></div></div><div className="size-tabs">{['Girls','Boys','Baby'].map((c)=><button key={c} className={category===c?'tab-active':''} onClick={()=>setCategory(c)}>{c==='Baby'?<Baby size={16}/>:<Shirt size={16}/>} {c}</button>)}</div><div className="size-table-wrap"><table className="size-table"><thead><tr><th>Age</th><th>Height</th><th>Chest</th><th>Waist</th><th>Little Star size</th></tr></thead><tbody>{rows.map((r)=><tr key={r[0]}>{r.map((c,i)=><td key={i}>{c}</td>)}</tr>)}</tbody></table></div><div className="size-guide-note"><span>✦</span><div><b>Between two sizes?</b><p>We recommend choosing the larger size for a little extra room to grow.</p></div></div><div className="measure-note"><div><span>01</span><h3>Height</h3><p>Measure from the top of their head to the floor, with shoes off.</p></div><div><span>02</span><h3>Chest</h3><p>Wrap the tape around the fullest part, keeping it comfortably loose.</p></div><div><span>03</span><h3>Waist</h3><p>Measure around their natural waist, where trousers usually sit.</p></div></div><Link className="text-arrow size-help" to="/contact">Still not sure? We’re happy to help <ArrowRight size={15}/></Link></main>
 }
 
+function AdminErrorAlert({ message, onDismiss, title = 'Unable to save product' }) {
+  if (!message) return null
+
+  let displayTitle = title
+  let displayMessage = message
+  let hint = ''
+
+  if (
+    message.includes('E11000') ||
+    message.includes('duplicate key error') ||
+    message.includes('already exists') ||
+    message.includes('DUPLICATE_RECORD')
+  ) {
+    displayTitle = 'Duplicate Product Name'
+    const match =
+      message.match(/dup key: \{ [^:]*: "([^"]+)" \}/) ||
+      message.match(/slug: "([^"]+)"/) ||
+      message.match(/named "([^"]+)"/)
+    const name = match ? match[1] : ''
+    displayMessage = name
+      ? `A product named "${name}" already exists in your catalog.`
+      : 'A product with this name or slug already exists in your catalog.'
+    hint = 'Please enter a unique product name or edit the existing product from the catalog list.'
+  } else if (message.toLowerCase().includes('network') || message.toLowerCase().includes('fetch')) {
+    displayTitle = 'Connection Error'
+    displayMessage = 'Could not reach the server. Please check your internet connection and try again.'
+  }
+
+  return (
+    <div className="admin-error-banner" role="alert">
+      <div className="admin-error-icon-wrap">
+        <AlertCircle size={18} className="admin-error-icon" />
+      </div>
+      <div className="admin-error-content">
+        <h4 className="admin-error-title">{displayTitle}</h4>
+        <p className="admin-error-message">{displayMessage}</p>
+        {hint && <p className="admin-error-hint">{hint}</p>}
+      </div>
+      {onDismiss && (
+        <button
+          type="button"
+          className="admin-error-dismiss"
+          onClick={onDismiss}
+          aria-label="Dismiss error"
+          title="Dismiss"
+        >
+          <X size={15} />
+        </button>
+      )}
+    </div>
+  )
+}
+
 function AdminLayout({ children }) {
   const { user, logout } = useStore()
   return <div className="admin-layout"><aside className="admin-sidebar"><BrandMark/><div className="admin-label">SHOP MANAGEMENT</div><nav aria-label="Shop management"><NavLink to="/admin" end><LayoutDashboard size={17}/> Overview</NavLink><NavLink to="/admin/products"><Shirt size={17}/> Products</NavLink><NavLink to="/admin/orders"><ClipboardList size={17}/> Orders</NavLink><NavLink to="/admin/customers"><Users size={17}/> Customers</NavLink><NavLink to="/admin/messages"><Mail size={17}/> Messages</NavLink></nav><div className="admin-sidebar-bottom"><span className="admin-avatar" aria-hidden="true">LS</span><span><b>{user?.name || 'Little Star'}</b><small>Shop administrator</small></span><button className="icon-button" aria-label="Sign out" onClick={logout}><LogOut size={17}/></button></div></aside><main className="admin-content">{children}</main></div>
@@ -424,7 +801,8 @@ function AdminDashboard() {
   const { user, reloadCatalog, refreshCart } = useStore()
   const location = useLocation(); const page = location.pathname.split('/')[2] || 'overview'
   const [query, setQuery] = useState(''); const [status, setStatus] = useState(''); const [showForm, setShowForm] = useState(false)
-  const [rows, setRows] = useState([]); const [dashboard, setDashboard] = useState(null); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [editing, setEditing] = useState(null); const [saving, setSaving] = useState(false)
+  const [rows, setRows] = useState([]); const [dashboard, setDashboard] = useState(null); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [formError, setFormError] = useState(''); const [editing, setEditing] = useState(null); const [saving, setSaving] = useState(false)
+  const [selectedOrder, setSelectedOrder] = useState(null)
   const [imageItems, setImageItems] = useState([]); const [imageError, setImageError] = useState('')
   const imageItemsRef = useRef([]); const imageInputRef = useRef(null)
   const savingRef = useRef(saving); savingRef.current = saving
@@ -434,7 +812,7 @@ function AdminDashboard() {
     imageItemsRef.current = items
     setImageItems(items)
   }, [])
-  const closeProductForm = useCallback(() => { if (savingRef.current) return; setShowForm(false); setEditing(null); setImageError(''); replaceImageItems([]); if (imageInputRef.current) imageInputRef.current.value = '' }, [replaceImageItems])
+  const closeProductForm = useCallback(() => { if (savingRef.current) return; setShowForm(false); setEditing(null); setImageError(''); setFormError(''); replaceImageItems([]); if (imageInputRef.current) imageInputRef.current.value = '' }, [replaceImageItems])
   useEffect(() => () => imageItemsRef.current.forEach((item) => { if (item.objectUrl) URL.revokeObjectURL(item.preview) }), [])
   useEffect(() => {
     if (!showForm) return
@@ -464,8 +842,8 @@ function AdminDashboard() {
   if (user?.role !== 'admin') return <main className="page-width not-found"><span>✦</span><h1>Administrator sign-in required.</h1><p>Sign in with the shop administrator account to manage the store.</p><Link className="button button-blue" to="/login">Sign in <ArrowRight size={15}/></Link></main>
   const formatDate = (date) => new Date(date).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})
   const orderStatusLabel = (value) => !value ? 'Unknown' : value === 'confirmed' ? 'Processing' : value.charAt(0).toUpperCase() + value.slice(1)
-  const openNew = () => { setEditing(null); setImageError(''); replaceImageItems([]); if (imageInputRef.current) imageInputRef.current.value = ''; setShowForm(true) }
-  const openEdit = (product) => { setEditing(product); setImageError(''); replaceImageItems((product.images || []).map((url, index) => ({ key: `existing-${index}-${url}`, url, preview: mediaUrl(url), file: null, objectUrl: false }))); if (imageInputRef.current) imageInputRef.current.value = ''; setShowForm(true) }
+  const openNew = () => { setEditing(null); setImageError(''); setFormError(''); replaceImageItems([]); if (imageInputRef.current) imageInputRef.current.value = ''; setShowForm(true) }
+  const openEdit = (product) => { setEditing(product); setImageError(''); setFormError(''); replaceImageItems((product.images || []).map((url, index) => ({ key: `existing-${index}-${url}`, url, preview: mediaUrl(url), file: null, objectUrl: false }))); if (imageInputRef.current) imageInputRef.current.value = ''; setShowForm(true) }
   const selectProductImages = (event) => {
     const files = Array.from(event.target.files || [])
     event.target.value = ''
@@ -479,7 +857,7 @@ function AdminDashboard() {
   }
   const removeProductImage = (index) => { replaceImageItems(imageItemsRef.current.filter((_, itemIndex) => itemIndex !== index)); setImageError('') }
   const submitProduct = async (event) => {
-    event.preventDefault(); setSaving(true); setError('')
+    event.preventDefault(); setSaving(true); setFormError('')
     const form = event.currentTarget; const data = new FormData(form)
     const body = { name: data.get('name'), category: data.get('category'), price: Number(data.get('price')), stock: Number(data.get('stock')) || 0 }
     if (data.get('colors')) body.colors = data.get('colors').split(',').map(s => s.trim()).filter(Boolean)
@@ -498,10 +876,10 @@ function AdminDashboard() {
       await api(editing ? `/products/${encodeURIComponent(editing.id)}` : '/products', { method: editing ? 'PUT' : 'POST', body })
       const removedUploads = (editing?.images || []).filter((image) => image.startsWith('/uploads/') && !body.images.includes(image))
       if (removedUploads.length) await api('/admin/uploads', { method: 'DELETE', body: { images: removedUploads } }).catch(() => {})
-      setShowForm(false); setEditing(null); setImageError(''); replaceImageItems([]); form.reset(); await load(); await reloadCatalog()
+      setShowForm(false); setEditing(null); setImageError(''); setFormError(''); replaceImageItems([]); form.reset(); await load(); await reloadCatalog()
     } catch (requestError) {
       if (uploadedImages.length) await api('/admin/uploads', { method: 'DELETE', body: { images: uploadedImages } }).catch(() => {})
-      setError(requestError.message || 'Could not save the product.')
+      setFormError(requestError.message || 'Could not save the product.')
     }
     finally { setSaving(false) }
   }
@@ -515,35 +893,51 @@ function AdminDashboard() {
     try { await api(`/admin/orders/${orderId}/status`, { method: 'PUT', body: { status: nextStatus } }); await load() }
     catch (requestError) { setError(requestError.message) }
   }
+  const deleteOrder = async (order) => {
+    if (!window.confirm(`Delete order #${order.orderNumber}? This will permanently remove the order.`)) return
+    try {
+      await api(`/admin/orders/${order._id}`, { method: 'DELETE' })
+      if (selectedOrder?._id === order._id) setSelectedOrder(null)
+      await load()
+    } catch (requestError) { setError(requestError.message || 'Could not delete order.') }
+  }
   if (page === 'products') return <AdminLayout>
     <div className="admin-top"><div><span>CATALOGUE</span><h1>Products</h1></div><button className="admin-primary" onClick={openNew}><Plus size={16}/> Add product</button></div>
-    {error&&<p className="form-error" role="alert">{error}</p>}
+    {error&&<AdminErrorAlert message={error} onDismiss={() => setError('')} title="Catalogue Notice" />}
     <div className="admin-table-card">
       <div className="admin-table-head"><h2 id="admin-products-heading">All products <span>{rows.length}</span></h2><div className="admin-search"><Search size={16}/><input type="search" inputMode="search" value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Search products" aria-label="Search admin products"/></div></div>
       <table className="admin-table" aria-labelledby="admin-products-heading"><thead><tr><th>PRODUCT</th><th>CATEGORY</th><th>PRICE</th><th>STOCK</th><th>ACTIONS</th></tr></thead><tbody>{rows.map((product, index)=><tr key={product._id || product.id || index}><td data-label="Product"><div className="admin-product"><img src={mediaUrl(product.images?.[0]) || '/assets/products/girl-01.jpg'} alt=""/><b>{product.name}</b></div></td><td data-label="Category">{product.category}</td><td data-label="Price">{money(product.price)}</td><td data-label="Stock">{(product.stock ?? 0) === 0 ? <span className="admin-status status-stock-out">Stock out</span> : `${product.stock} units`}</td><td data-label="Actions" className="admin-product-actions"><div className="action-buttons-wrap"><button className="admin-icon-btn edit-btn" onClick={()=>openEdit(product)} title="Edit Product"><Pencil size={14}/> <span>Edit</span></button> <button className="admin-icon-btn deactivate-btn" onClick={()=>deleteProduct(product)} title="Delete Product"><Trash2 size={14}/> <span>Delete</span></button></div></td></tr>)}</tbody></table>
       {loading&&<p className="admin-empty" role="status">Loading products…</p>}{!loading&&!rows.length&&<p className="admin-empty">No products found.</p>}
     </div>
     {showForm&&<div className="admin-modal-backdrop" role="presentation" onClick={closeProductForm}><section className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="admin-modal-title" onClick={(event)=>event.stopPropagation()}><button className="admin-modal-close" aria-label="Close" onClick={closeProductForm}><X size={18}/></button><span className="eyebrow">A NEW LITTLE LOOK</span><h2 id="admin-modal-title">{editing?'Edit product':'Add a product'}</h2><form onSubmit={submitProduct}>
-      <label>Product name<input required minLength="2" name="name" pattern=".*\S.*" defaultValue={editing?.name || ''} placeholder="e.g. Sunny Day Dress" autoComplete="off"/></label>
+      <label>Product name<input required minLength="2" name="name" pattern=".*\S.*" defaultValue={editing?.name || ''} placeholder="e.g. Sunny Day Dress" autoComplete="off" className={formError && (formError.toLowerCase().includes('name') || formError.toLowerCase().includes('duplicate') || formError.toLowerCase().includes('slug')) ? 'input-has-error' : ''} onChange={() => { if (formError) setFormError('') }}/></label>
       <label>Category<select name="category" defaultValue={editing?.category || 'Girls'}><option>Girls</option><option>Boys</option><option>Baby</option></select></label>
       <div className="field-grid"><label>Price (₹)<input required name="price" type="number" inputMode="decimal" min="1" defaultValue={editing?.price || ''} placeholder="999"/></label><label>Stock<input name="stock" type="number" inputMode="numeric" min="0" defaultValue={editing?.stock ?? 0} placeholder="0"/></label></div>
       <div className="field-grid"><label>Colors<input required name="colors" defaultValue={editing?.colors?.join(', ') || ''} placeholder="e.g. Pink, Blue" autoComplete="off"/></label><label>Sizes<input required name="sizes" defaultValue={editing?.sizes?.join(', ') || ''} placeholder="e.g. 2Y, 3Y, 4Y" autoComplete="off"/></label></div>
       <fieldset className="admin-image-field"><legend>Product images</legend><input ref={imageInputRef} className="admin-file-input" id="admin-product-images" type="file" accept="image/jpeg,image/png,image/webp" multiple aria-describedby="admin-image-help" onChange={selectProductImages}/><button type="button" className="admin-upload-button" onClick={()=>imageInputRef.current?.click()}><Plus size={16}/> Add images</button><p id="admin-image-help" className="admin-image-help">Up to 8 images · JPEG, PNG, or WebP · 5 MB max each.</p>{imageError&&<p className="form-error" role="alert">{imageError}</p>}{imageItems.length>0?<div className="admin-image-grid">{imageItems.map((image,index)=><div className="admin-image-preview" key={image.key}><img src={image.preview} alt={'Product image ' + (index + 1) + ' preview'}/>{index===0&&<span className="admin-image-cover">Cover</span>}<button type="button" aria-label={'Remove image ' + (index + 1)} onClick={()=>removeProductImage(index)}><X size={15}/></button></div>)}</div>:<p className="admin-image-empty">No images selected. The standard shop image will be used until you add photos.</p>}</fieldset>
-      {error&&<p className="form-error" role="alert">{error}</p>}<button className="admin-primary" disabled={saving || Boolean(imageError)}><Plus size={15}/>{saving?'Uploading & saving…':'Save product'}</button>
+      {formError&&<AdminErrorAlert message={formError} onDismiss={() => setFormError('')} />}<button className="admin-primary" disabled={saving || Boolean(imageError)}><Plus size={15}/>{saving?'Uploading & saving…':'Save product'}</button>
     </form></section></div>}
   </AdminLayout>
   if (page === 'orders') {
-    const orderRows = rows.map((order)=>[order.orderNumber,formatDate(order.createdAt),order.buyer?.name || 'Guest',money(order.total),orderStatusLabel(order.orderStatus),order._id,order.orderStatus])
-    return <AdminLayout><div className="admin-top"><div><span>FULFILMENT</span><h1>Orders</h1></div><label className="admin-filter">Status <select aria-label="Filter orders by status" value={status} onChange={(event)=>setStatus(event.target.value)}><option value="">All orders</option><option value="confirmed">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></label></div>{error&&<p className="form-error" role="alert">{error}</p>}<div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-orders-heading">Recent orders</h2><div className="admin-search"><Search size={16}/><input type="search" inputMode="search" value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search orders" aria-label="Search admin orders"/></div></div>{loading?<p className="admin-empty" role="status">Loading orders…</p>:<AdminDataTable rows={orderRows} onStatusChange={updateOrder} labelledBy="admin-orders-heading"/>}</div></AdminLayout>
+    return <AdminLayout><div className="admin-top"><div><span>FULFILMENT</span><h1>Orders</h1></div><label className="admin-filter">Status <select aria-label="Filter orders by status" value={status} onChange={(event)=>setStatus(event.target.value)}><option value="">All orders</option><option value="confirmed">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></label></div>{error&&<AdminErrorAlert message={error} onDismiss={() => setError('')} title="Orders Notice" />}<div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-orders-heading">Recent orders <span>{rows.length}</span></h2><div className="admin-search"><Search size={16}/><input type="search" inputMode="search" value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search orders" aria-label="Search admin orders"/></div></div>{loading?<p className="admin-empty" role="status">Loading orders…</p>:!rows.length?<p className="admin-empty">No orders found.</p>:<AdminDataTable orders={rows} onStatusChange={updateOrder} onDeleteOrder={deleteOrder} onViewOrder={setSelectedOrder} labelledBy="admin-orders-heading"/>}</div>{selectedOrder&&<OrderDetailsModal order={selectedOrder} onClose={()=>setSelectedOrder(null)}/>}</AdminLayout>
   }
-  if (page === 'customers') return <AdminLayout><div className="admin-top"><div><span>YOUR COMMUNITY</span><h1>Customers</h1></div><span className="admin-filter"><Users size={15}/> {rows.length} customers</span></div>{error&&<p className="form-error" role="alert">{error}</p>}<div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-customers-heading">Little Star families <span>{rows.length}</span></h2><div className="admin-search"><Search size={16}/><input type="search" inputMode="search" value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search customers" aria-label="Search admin customers"/></div></div><table className="admin-table" aria-labelledby="admin-customers-heading"><thead><tr><th>CUSTOMER</th><th>ORDERS</th><th>TOTAL SPENT</th><th>LAST ORDER</th><th>STATUS</th></tr></thead><tbody>{rows.map((customer)=><tr key={customer._id}><td data-label="Customer"><div className="customer-name"><span aria-hidden="true">{(customer.name || 'User').split(' ').map((word)=>word[0]).join('')}</span><b>{customer.name || 'User'}</b></div></td><td data-label="Orders">{customer.orderStats?.orderCount || 0}</td><td data-label="Total spent">{money(customer.orderStats?.amountSpent || 0)}</td><td data-label="Last order">{customer.orderStats?.lastOrderAt ? formatDate(customer.orderStats.lastOrderAt) : '—'}</td><td data-label="Status"><span className="admin-status status-active">{customer.isActive?'Active':'Inactive'}</span></td></tr>)}</tbody></table>{loading&&<p className="admin-empty" role="status">Loading customers…</p>}</div></AdminLayout>
-  if (page === 'messages') return <AdminLayout><div className="admin-top"><div><span>CUSTOMER CARE</span><h1>Messages</h1></div><span className="admin-filter"><Mail size={15}/> {rows.length} messages</span></div>{error&&<p className="form-error" role="alert">{error}</p>}<div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-messages-heading">Contact messages <span>{rows.length}</span></h2><div className="admin-search"><Search size={16}/><input type="search" inputMode="search" value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search messages" aria-label="Search admin messages"/></div></div>{loading?<p className="admin-empty" role="status">Loading messages…</p>:rows.length?<table className="admin-table" aria-labelledby="admin-messages-heading"><thead><tr><th>FROM</th><th>PHONE</th><th>MESSAGE</th><th>RECEIVED</th><th>STATUS</th></tr></thead><tbody>{rows.map((message)=><tr key={message._id}><td data-label="From"><b>{message.name}</b><small>{message.email}</small></td><td data-label="Phone">{message.phone}</td><td data-label="Message" className="admin-message-cell">{message.message}</td><td data-label="Received">{formatDate(message.createdAt)}</td><td data-label="Status"><select aria-label={`Status for ${message.name}`} value={message.status} onChange={async(event)=>{try{await api(`/admin/contact-messages/${message._id}`,{method:'PATCH',body:{status:event.target.value}});await load()}catch(requestError){setError(requestError.message)}}}><option value="new">New</option><option value="read">Read</option><option value="resolved">Resolved</option></select></td></tr>)}</tbody></table>:<p className="admin-empty">No contact messages yet.</p>}</div></AdminLayout>
+  if (page === 'customers') return <AdminLayout><div className="admin-top"><div><span>YOUR COMMUNITY</span><h1>Customers</h1></div><span className="admin-filter"><Users size={15}/> {rows.length} customers</span></div>{error&&<AdminErrorAlert message={error} onDismiss={() => setError('')} title="Customers Notice" />}<div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-customers-heading">Little Star families <span>{rows.length}</span></h2><div className="admin-search"><Search size={16}/><input type="search" inputMode="search" value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search customers" aria-label="Search admin customers"/></div></div><table className="admin-table" aria-labelledby="admin-customers-heading"><thead><tr><th>CUSTOMER</th><th>ORDERS</th><th>TOTAL SPENT</th><th>LAST ORDER</th><th>STATUS</th></tr></thead><tbody>{rows.map((customer)=><tr key={customer._id}><td data-label="Customer"><div className="customer-name"><span aria-hidden="true">{(customer.name || 'User').split(' ').map((word)=>word[0]).join('')}</span><b>{customer.name || 'User'}</b></div></td><td data-label="Orders">{customer.orderStats?.orderCount || 0}</td><td data-label="Total spent">{money(customer.orderStats?.amountSpent || 0)}</td><td data-label="Last order">{customer.orderStats?.lastOrderAt ? formatDate(customer.orderStats.lastOrderAt) : '—'}</td><td data-label="Status"><span className="admin-status status-active">{customer.isActive?'Active':'Inactive'}</span></td></tr>)}</tbody></table>{loading&&<p className="admin-empty" role="status">Loading customers…</p>}</div></AdminLayout>
+  if (page === 'messages') return <AdminLayout><div className="admin-top"><div><span>CUSTOMER CARE</span><h1>Messages</h1></div><span className="admin-filter"><Mail size={15}/> {rows.length} messages</span></div>{error&&<AdminErrorAlert message={error} onDismiss={() => setError('')} title="Messages Notice" />}<div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-messages-heading">Contact messages <span>{rows.length}</span></h2><div className="admin-search"><Search size={16}/><input type="search" inputMode="search" value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search messages" aria-label="Search admin messages"/></div></div>{loading?<p className="admin-empty" role="status">Loading messages…</p>:rows.length?<table className="admin-table" aria-labelledby="admin-messages-heading"><thead><tr><th>FROM</th><th>PHONE</th><th>MESSAGE</th><th>RECEIVED</th><th>STATUS</th></tr></thead><tbody>{rows.map((message)=><tr key={message._id}><td data-label="From"><b>{message.name}</b><small>{message.email}</small></td><td data-label="Phone">{message.phone}</td><td data-label="Message" className="admin-message-cell">{message.message}</td><td data-label="Received">{formatDate(message.createdAt)}</td><td data-label="Status"><select aria-label={`Status for ${message.name}`} value={message.status} onChange={async(event)=>{try{await api(`/admin/contact-messages/${message._id}`,{method:'PATCH',body:{status:event.target.value}});await load()}catch(requestError){setError(requestError.message)}}}><option value="new">New</option><option value="read">Read</option><option value="resolved">Resolved</option></select></td></tr>)}</tbody></table>:<p className="admin-empty">No contact messages yet.</p>}</div></AdminLayout>
   const recent = (dashboard?.recentOrders || []).map((order)=>[order.orderNumber,formatDate(order.createdAt),order.buyer?.name || 'Guest',money(order.total),orderStatusLabel(order.orderStatus),order._id,order.orderStatus])
-  return <AdminLayout><div className="admin-top"><div><span>SHOP OVERVIEW</span><h1>Good afternoon, {user.name} ✦</h1><p>Here’s what’s happening at your shop today.</p></div><span className="admin-filter"><Clock3 size={15}/> Live data</span></div>{error&&<p className="form-error" role="alert">{error}</p>}<div className="admin-stats"><div><span>Total orders</span><b>{dashboard?.totalOrders ?? '—'}</b><small>All orders</small><ClipboardList/></div><div><span>Total sales</span><b>{money(dashboard?.totalSales || 0)}</b><small>Excluding cancelled</small><span className="stat-rupee">₹</span></div><div><span>Products</span><b>{dashboard?.products ?? '—'}</b><small>Active styles</small><Shirt/></div><div><span>Customers</span><b>{dashboard?.customers ?? '—'}</b><small>Registered families</small><Users/></div></div><div className="admin-lower"><div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-dashboard-orders-heading">Recent orders</h2><Link to="/admin/orders">View all <ArrowRight size={14}/></Link></div>{loading?<p className="admin-empty" role="status">Loading dashboard…</p>:<AdminDataTable rows={recent} compact onStatusChange={updateOrder} labelledBy="admin-dashboard-orders-heading"/>}</div><div className="admin-side-card"><span className="eyebrow">SHOP MANAGEMENT</span><div className="admin-note-icon"><Star fill="currentColor"/></div><h2>Your shop is shining.</h2><p>{dashboard?.products || 0} lovely styles are active. Review stock and keep the little stars coming back for more.</p><Link to="/admin/products" className="text-arrow">Manage products <ArrowRight size={15}/></Link></div></div></AdminLayout>
+  return <AdminLayout><div className="admin-top"><div><span>SHOP OVERVIEW</span><h1>Good afternoon, {user.name} ✦</h1><p>Here’s what’s happening at your shop today.</p></div><span className="admin-filter"><Clock3 size={15}/> Live data</span></div>{error&&<AdminErrorAlert message={error} onDismiss={() => setError('')} title="Overview Notice" />}<div className="admin-stats"><div><span>Total orders</span><b>{dashboard?.totalOrders ?? '—'}</b><small>All orders</small><ClipboardList/></div><div><span>Total sales</span><b>{money(dashboard?.totalSales || 0)}</b><small>Excluding cancelled</small><span className="stat-rupee">₹</span></div><div><span>Products</span><b>{dashboard?.products ?? '—'}</b><small>Active styles</small><Shirt/></div><div><span>Customers</span><b>{dashboard?.customers ?? '—'}</b><small>Registered families</small><Users/></div></div><div className="admin-lower"><div className="admin-table-card"><div className="admin-table-head"><h2 id="admin-dashboard-orders-heading">Recent orders</h2><Link to="/admin/orders">View all <ArrowRight size={14}/></Link></div>{loading?<p className="admin-empty" role="status">Loading dashboard…</p>:<AdminDataTable rows={recent} compact onStatusChange={updateOrder} labelledBy="admin-dashboard-orders-heading"/>}</div><div className="admin-side-card"><span className="eyebrow">SHOP MANAGEMENT</span><div className="admin-note-icon"><Star fill="currentColor"/></div><h2>Your shop is shining.</h2><p>{dashboard?.products || 0} lovely styles are active. Review stock and keep the little stars coming back for more.</p><Link to="/admin/products" className="text-arrow">Manage products <ArrowRight size={15}/></Link></div></div></AdminLayout>
 }
 
-function AdminDataTable({ rows, compact = false, onStatusChange, labelledBy }) {
-  return <table className="admin-table" aria-labelledby={labelledBy}><thead><tr><th>ORDER</th><th>CUSTOMER</th><th>AMOUNT</th><th>STATUS</th>{!compact&&<th>DATE</th>}</tr></thead><tbody>{rows.map((row, index)=><tr key={row[5] || index}><td data-label="Order"><b>{row[0]}</b>{compact&&<small>{row[1]}</small>}</td><td data-label="Customer">{row[2]}</td><td data-label="Amount">{row[3]}</td><td data-label="Status">{onStatusChange && row[5] ? <select aria-label={`Order ${row[0]} status`} value={row[6]} onChange={(event)=>onStatusChange(row[5],event.target.value)}><option value="confirmed">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select> : <span className={`admin-status status-${row[4].toLowerCase()}`}>{row[4]}</span>}</td>{!compact&&<td data-label="Date">{row[1]}</td>}</tr>)}</tbody></table>
+function OrderDetailsModal({ order, onClose }) {
+  if (!order) return null
+  return <div className="admin-modal-backdrop" role="presentation" onClick={onClose}><section className="admin-modal" style={{ maxWidth: '640px', maxHeight: '90vh', overflowY: 'auto' }} role="dialog" aria-modal="true" aria-labelledby="order-modal-title" onClick={(e)=>e.stopPropagation()}><button className="admin-modal-close" aria-label="Close" onClick={onClose}><X size={18}/></button><span className="eyebrow">ORDER DETAILS</span><h2 id="order-modal-title">Order #{order.orderNumber}</h2><div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', margin: '0.6rem 0 1.25rem' }}><span className={`status-pill status-${order.orderStatus}`} style={{ padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.825rem', fontWeight: 600 }}>{order.orderStatus}</span><span style={{ background: '#f3f4f6', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.825rem' }}>{new Date(order.createdAt).toLocaleString('en-IN')}</span><span style={{ background: '#f3f4f6', padding: '0.25rem 0.75rem', borderRadius: '999px', fontSize: '0.825rem' }}>{order.paymentMethod?.toUpperCase()} ({order.paymentStatus})</span></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', background: '#f8fafc', padding: '1rem', borderRadius: '12px', marginBottom: '1.25rem' }}><div><h4 style={{ margin: '0 0 0.35rem', fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase' }}>Customer & Contact</h4><p style={{ margin: '0 0 0.2rem', fontWeight: 600 }}>{order.buyer?.name || 'Guest'}</p><p style={{ margin: '0 0 0.2rem', fontSize: '0.85rem' }}>{order.buyer?.email}</p><p style={{ margin: 0, fontSize: '0.85rem' }}>{order.buyer?.phone}</p></div><div><h4 style={{ margin: '0 0 0.35rem', fontSize: '0.8rem', color: '#64748b', textTransform: 'uppercase' }}>Delivery Address</h4><p style={{ margin: '0 0 0.2rem', fontWeight: 600 }}>{order.shippingAddress?.fullName || order.buyer?.name}</p><p style={{ margin: '0 0 0.2rem', fontSize: '0.85rem' }}>{order.shippingAddress?.line1}{order.shippingAddress?.line2 ? `, ${order.shippingAddress.line2}` : ''}</p><p style={{ margin: 0, fontSize: '0.85rem' }}>{order.shippingAddress?.city}, {order.shippingAddress?.state} {order.shippingAddress?.postalCode}</p></div></div><h4 style={{ margin: '0 0 0.6rem', fontSize: '0.9rem' }}>Items Ordered ({order.items?.length || 0})</h4><div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginBottom: '1.25rem' }}>{(order.items || []).map((item, idx)=><div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.6rem', border: '1px solid #e2e8f0', borderRadius: '8px' }}>{item.image&&<img src={mediaUrl(item.image)} alt="" style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px' }}/>} <div style={{ flex: 1 }}><b style={{ display: 'block', fontSize: '0.875rem' }}>{item.name}</b><small style={{ color: '#64748b' }}>Size {item.size} · {item.color} · Qty {item.quantity}</small></div><div style={{ textAlign: 'right' }}><b>{money(item.unitPrice * item.quantity)}</b><small style={{ display: 'block', color: '#64748b', fontSize: '0.75rem' }}>{money(item.unitPrice)} each</small></div></div>)}</div><div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '1.25rem' }}><div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem' }}><span>Subtotal</span><b>{money(order.subtotal || 0)}</b></div><div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem' }}><span>Delivery</span><b>{order.shipping ? money(order.shipping) : 'Free'}</b></div><div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1rem', fontWeight: 700, borderTop: '1px solid #e2e8f0', paddingTop: '0.5rem' }}><span>Total</span><b>{money(order.total || 0)}</b></div></div><button className="button button-blue full-button" onClick={onClose}>Close</button></section></div>
+}
+
+function AdminDataTable({ orders, rows, compact = false, onStatusChange, onDeleteOrder, onViewOrder, labelledBy }) {
+  if (orders && orders.length > 0) {
+    return <table className="admin-table" aria-labelledby={labelledBy}><thead><tr><th>ORDER</th><th>CUSTOMER</th><th>AMOUNT</th><th>STATUS</th>{!compact&&<th>DATE</th>}{(!compact||onViewOrder||onDeleteOrder)&&<th>ACTIONS</th>}</tr></thead><tbody>{orders.map((order)=><tr key={order._id}><td data-label="Order"><b>{order.orderNumber}</b></td><td data-label="Customer"><div><b>{order.buyer?.name || 'Guest'}</b><small style={{ display: 'block', color: 'var(--ink-light, #666)' }}>{order.buyer?.phone}</small></div></td><td data-label="Amount"><b>{money(order.total)}</b><small style={{ display: 'block', textTransform: 'uppercase', fontSize: '0.72rem', color: order.paymentStatus === 'paid' ? '#16a34a' : '#d97706' }}>{order.paymentMethod === 'razorpay' ? 'Razorpay' : 'COD'} · {order.paymentStatus}</small></td><td data-label="Status">{onStatusChange ? <select aria-label={`Order ${order.orderNumber} status`} value={order.orderStatus} onChange={(event)=>onStatusChange(order._id,event.target.value)}><option value="confirmed">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select> : <span className={`admin-status status-${order.orderStatus}`}>{order.orderStatus}</span>}</td>{!compact&&<td data-label="Date">{new Date(order.createdAt).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</td>}<td data-label="Actions" className="admin-product-actions"><div className="action-buttons-wrap">{onViewOrder&&<button className="admin-icon-btn edit-btn" onClick={()=>onViewOrder(order)} title="See order details"><Eye size={14}/> <span>Details</span></button>}{onDeleteOrder&&<button className="admin-icon-btn deactivate-btn" onClick={()=>onDeleteOrder(order)} title="Delete order"><Trash2 size={14}/> <span>Delete</span></button>}</div></td></tr>)}</tbody></table>
+  }
+  const legacyRows = rows || []
+  return <table className="admin-table" aria-labelledby={labelledBy}><thead><tr><th>ORDER</th><th>CUSTOMER</th><th>AMOUNT</th><th>STATUS</th>{!compact&&<th>DATE</th>}</tr></thead><tbody>{legacyRows.map((row, index)=><tr key={row[5] || index}><td data-label="Order"><b>{row[0]}</b>{compact&&<small>{row[1]}</small>}</td><td data-label="Customer">{row[2]}</td><td data-label="Amount">{row[3]}</td><td data-label="Status">{onStatusChange && row[5] ? <select aria-label={`Order ${row[0]} status`} value={row[6]} onChange={(event)=>onStatusChange(row[5],event.target.value)}><option value="confirmed">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select> : <span className={`admin-status status-${row[4].toLowerCase()}`}>{row[4]}</span>}</td>{!compact&&<td data-label="Date">{row[1]}</td>}</tr>)}</tbody></table>
 }
 function NotFound(){return <main className="page-width not-found"><span>✦</span><h1>Oops, we lost that little star.</h1><p>This page has wandered off on an adventure.</p><Link className="button button-blue" to="/">Back to the playground <ArrowRight size={15}/></Link></main>}
 

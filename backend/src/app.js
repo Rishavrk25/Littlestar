@@ -21,7 +21,7 @@ const adminCookieName = 'ls_admin_session'
 const uploadDirectory = fileURLToPath(new URL('../uploads/', import.meta.url))
 const imageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { files: 8, fileSize: 5 * 1024 * 1024, parts: 8 },
+  limits: { files: 30, fileSize: 5 * 1024 * 1024, parts: 30 },
   fileFilter(_req, file, callback) {
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) return callback(fail(400, 'Choose JPEG, PNG, or WebP images.', 'INVALID_UPLOAD'))
     callback(null, true)
@@ -46,6 +46,7 @@ const asOrder = (order) => {
   const value = typeof order.toJSON === 'function' ? order.toJSON() : { ...order }
   delete value.idempotencyKey
   delete value.user
+  delete value.guestId
   delete value.__v
   return value
 }
@@ -77,8 +78,9 @@ function imageExtension(buffer, mimeType) {
   return ''
 }
 
-function setAuthCookie(req, res, token, config) {
-  const cookieName = req.get('X-App-Role') === 'admin' ? adminCookieName : authCookieName
+function setAuthCookie(req, res, token, config, role = null) {
+  const isRoleAdmin = role === 'admin' || req.get('X-App-Role') === 'admin'
+  const cookieName = isRoleAdmin ? adminCookieName : authCookieName
   res.cookie(cookieName, token, { httpOnly: true, secure: config.cookieSecure, sameSite: config.cookieSameSite, path: '/', maxAge: 7 * 24 * 60 * 60 * 1000 })
 }
 function setGuestCookie(res, id, config) {
@@ -93,8 +95,12 @@ function getGuest(req, res, config) {
   return guestId
 }
 function tokenFromRequest(req) {
-  const cookieName = req.get('X-App-Role') === 'admin' ? adminCookieName : authCookieName
-  if (req.cookies?.[cookieName]) return req.cookies[cookieName]
+  const roleHeader = req.get('X-App-Role')
+  if (roleHeader === 'admin' && req.cookies?.[adminCookieName]) return req.cookies[adminCookieName]
+  if (roleHeader === 'customer' && req.cookies?.[authCookieName]) return req.cookies[authCookieName]
+  if (req.cookies?.[adminCookieName] && (req.path?.startsWith('/admin') || !req.cookies?.[authCookieName])) return req.cookies[adminCookieName]
+  if (req.cookies?.[authCookieName]) return req.cookies[authCookieName]
+  if (req.cookies?.[adminCookieName]) return req.cookies[adminCookieName]
   const header = req.get('authorization') || ''
   return header.startsWith('Bearer ') ? header.slice(7) : ''
 }
@@ -114,7 +120,7 @@ function auth(config, required = true, admin = false, customerOnly = false) {
       req.user = await resolveAuth(req, config)
       if (required && !req.user) throw fail(401, 'Please sign in to continue.', 'AUTH_REQUIRED')
       if (admin && req.user?.role !== 'admin') throw fail(403, 'Administrator access is required.', 'ADMIN_REQUIRED')
-      if (customerOnly && req.user?.role !== 'customer') throw fail(403, 'Customer access is required.', 'CUSTOMER_REQUIRED')
+      if (customerOnly && req.user && req.user.role !== 'customer') throw fail(403, 'Customer access is required.', 'CUSTOMER_REQUIRED')
       next()
     } catch (error) { next(error) }
   }
@@ -253,7 +259,13 @@ export function createApp(options = {}) {
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
   app.use(cors({ origin(origin, callback) { if (!origin || config.origins.includes(origin)) return callback(null, true); return callback(fail(403, 'This origin is not allowed.', 'CORS_ORIGIN_DENIED')) }, credentials: true, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'] }))
   app.use('/uploads', express.static(uploadDirectory, { dotfiles: 'deny', fallthrough: false, immutable: true, index: false, maxAge: '1y' }))
-  app.use(express.json({ limit: '64kb', strict: true }))
+  app.use(express.json({
+    limit: '64kb',
+    strict: true,
+    verify: (req, _res, buffer) => {
+      if (req.originalUrl?.startsWith('/api/payment/razorpay/webhook')) req.rawBody = buffer
+    },
+  }))
   app.use(cookieParser())
   app.use((req, res, next) => {
     const start = process.hrtime.bigint()
@@ -273,11 +285,12 @@ export function createApp(options = {}) {
 
   const api = express.Router()
   const maybeUser = auth(config, false)
-  const customer = auth(config, true, false, true)
+  const customer = auth(config, false, false, true)
+  const signedInCustomer = auth(config, true, false, true)
   const admin = auth(config, true, true)
   const signedIn = auth(config, true)
 
-  api.post('/admin/uploads', admin, imageUpload.array('images', 8), async (req, res) => {
+  api.post('/admin/uploads', admin, imageUpload.array('images', 30), async (req, res) => {
     const files = req.files || []
     if (!files.length) throw fail(400, 'Choose at least one image to upload.', 'INVALID_UPLOAD')
     const prepared = files.map((file) => {
@@ -300,11 +313,11 @@ export function createApp(options = {}) {
   })
 
   api.delete('/admin/uploads', admin, async (req, res) => {
-    const images = stringArrayInput(req.body.images, 'Images', { maxItems: 8, maxLength: 100 })
+    const images = stringArrayInput(req.body.images, 'Images', { maxItems: 60, maxLength: 100 })
     if (images.some((image) => !/^\/uploads\/image-[a-f0-9-]{36}\.(?:jpg|png|webp)$/i.test(image))) throw fail(400, 'Only uploaded product images can be removed.', 'INVALID_UPLOAD')
     let removed = 0
     for (const image of images) {
-      if (await Product.exists({ images: image })) continue
+      if (await Product.exists({ $or: [{ images: image }, { 'colorImages.images': image }] })) continue
       const filename = path.basename(image)
       try { await unlink(path.join(uploadDirectory, filename)); removed++ }
       catch (error) { if (error.code !== 'ENOENT') throw error }
@@ -347,7 +360,21 @@ export function createApp(options = {}) {
     }
     if (!payload.email) throw fail(400, 'Google account must have an email.', 'INVALID_ACCOUNT')
     let user = await User.findOne({ email: payload.email.toLowerCase() })
-    if (!user) user = await User.create({ name: payload.name || 'Google User', email: payload.email.toLowerCase(), role: 'customer' })
+    if (user && !user.isActive) throw fail(403, 'Account is deactivated. Please contact support.', 'ACCOUNT_DISABLED')
+    if (!user) {
+      user = await User.create({
+        name: payload.name || 'Google User',
+        email: payload.email.toLowerCase(),
+        role: 'customer',
+        authProvider: 'google',
+        googleId: payload.sub,
+        lastLoginAt: new Date()
+      })
+    } else {
+      if (!user.googleId && payload.sub) user.googleId = payload.sub
+      user.lastLoginAt = new Date()
+      await user.save()
+    }
     const jwtToken = jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, { expiresIn: config.jwtExpiresIn, issuer: 'little-star-kids-wear', audience: 'little-star-client' })
     setAuthCookie(req, res, jwtToken, config)
     await mergeGuestState(req, res, config, user)
@@ -358,13 +385,16 @@ export function createApp(options = {}) {
     const password = typeof req.body.password === 'string' ? req.body.password : ''
     if (!validEmail(email) || Buffer.byteLength(password, 'utf8') < 8 || Buffer.byteLength(password, 'utf8') > 72) throw fail(400, 'Enter a valid email and password of 8–72 bytes.', 'INVALID_CREDENTIALS')
     const user = await User.findOne({ email, isActive: true }).select('+passwordHash')
-    if (!user || !(await bcrypt.compare(password, user.passwordHash))) throw fail(401, 'Email or password is incorrect.', 'INVALID_CREDENTIALS')
+    if (!user) throw fail(401, 'Email or password is incorrect.', 'INVALID_CREDENTIALS')
+    if (!user.passwordHash) throw fail(400, 'This account is registered with Google. Please sign in with Google.', 'USE_GOOGLE_LOGIN')
+    if (!(await bcrypt.compare(password, user.passwordHash))) throw fail(401, 'Email or password is incorrect.', 'INVALID_CREDENTIALS')
     user.lastLoginAt = new Date()
     await user.save()
-    setAuthCookie(req, res, jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, { expiresIn: config.jwtExpiresIn, issuer: 'little-star-kids-wear', audience: 'little-star-client' }), config)
+    setAuthCookie(req, res, jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, { expiresIn: config.jwtExpiresIn, issuer: 'little-star-kids-wear', audience: 'little-star-client' }), config, user.role)
     await mergeGuestState(req, res, config, user)
     return envelope(res, { user: user.toJSON() })
   })
+
   api.post('/auth/logout', maybeUser, async (req, res) => {
     const cookieName = req.get('X-App-Role') === 'admin' ? adminCookieName : authCookieName
     res.clearCookie(cookieName, { path: '/' }); envelope(res, { loggedOut: true })
@@ -373,22 +403,41 @@ export function createApp(options = {}) {
   api.put('/auth/me', signedIn, async (req, res) => {
     const name = requestText(req.body.name, 'Name', { min: 2, max: 120, required: true })
     const phone = requestText(req.body.phone, 'Phone number', { max: 20 })
-    if (name.length < 2 || (phone && !/^[+\d()\s-]{8,20}$/.test(phone))) throw fail(400, 'Enter a valid name and phone number.', 'INVALID_PROFILE')
-    req.user.name = name; req.user.phone = phone
+    const contactEmail = requestText(req.body.contactEmail, 'Contact email', { max: 254 }).toLowerCase()
+    if (name.length < 2 || (phone && !/^[+\d()\s-]{8,20}$/.test(phone)) || (contactEmail && !validEmail(contactEmail))) {
+      throw fail(400, 'Enter a valid name, contact email, and phone number.', 'INVALID_PROFILE')
+    }
+    req.user.name = name
+    req.user.phone = phone
+    if (req.body.contactEmail !== undefined) req.user.contactEmail = contactEmail
     await req.user.save()
     envelope(res, { user: req.user.toJSON() })
   })
-  api.get('/auth/addresses', customer, (req, res) => envelope(res, { addresses: req.user.addresses }))
-  api.post('/auth/addresses', customer, async (req, res) => {
+  api.get('/auth/addresses', signedInCustomer, (req, res) => envelope(res, { addresses: req.user.addresses }))
+  api.post('/auth/addresses', signedInCustomer, async (req, res) => {
     const address = validateAddress(req.body, { requirePhone: true })
-    req.user.addresses.push({ ...address, label: cleanText(req.body.label || 'Home', 40) })
+    const label = cleanText(req.body.label || 'Home', 40) || 'Home'
+    const makeDefault = req.body.isDefault !== false
+    saveUserContactAndAddress(req.user, { address, label, makeDefault })
     await req.user.save()
-    envelope(res, { addresses: req.user.addresses }, 201)
+    envelope(res, { addresses: req.user.addresses, user: req.user.toJSON() }, 201)
   })
-  api.delete('/auth/addresses/:addressId', customer, async (req, res) => {
+  api.put('/auth/addresses/:addressId/default', signedInCustomer, async (req, res) => {
     const address = req.user.addresses.id(req.params.addressId)
     if (!address) throw fail(404, 'Address not found.', 'NOT_FOUND')
-    address.deleteOne(); await req.user.save(); envelope(res, { addresses: req.user.addresses })
+    req.user.addresses.forEach((entry) => { entry.isDefault = entry._id.equals(address._id) })
+    await req.user.save()
+    envelope(res, { addresses: req.user.addresses, user: req.user.toJSON() })
+  })
+  api.delete('/auth/addresses/:addressId', signedInCustomer, async (req, res) => {
+    const address = req.user.addresses.id(req.params.addressId)
+    if (!address) throw fail(404, 'Address not found.', 'NOT_FOUND')
+    address.deleteOne()
+    if (req.user.addresses.length && !req.user.addresses.some((entry) => entry.isDefault)) {
+      req.user.addresses[req.user.addresses.length - 1].isDefault = true
+    }
+    await req.user.save()
+    envelope(res, { addresses: req.user.addresses, user: req.user.toJSON() })
   })
 
   api.get('/categories', async (_req, res) => {
@@ -519,7 +568,7 @@ export function createApp(options = {}) {
     const guestId = getGuest(req, res, config)
     envelope(res, await populatedCart(ownerQuery(req, guestId), guestId))
   })
-  api.post('/cart', customer, async (req, res) => {
+  api.post('/cart', maybeUser, async (req, res) => {
     const guestId = getGuest(req, res, config)
     const id = requestText(req.body.productId || req.body.id, 'Product ID', { min: 1, max: 100, required: true })
     const size = requestText(req.body.size, 'Size', { min: 1, max: 20, required: true }); const color = requestText(req.body.color, 'Color', { min: 1, max: 40, required: true })
@@ -533,7 +582,7 @@ export function createApp(options = {}) {
     await addCartItem(query, product, size, color, quantity, variant.stock)
     envelope(res, await populatedCart(query, guestId), 201)
   })
-  api.put('/cart/:itemId', customer, async (req, res) => {
+  api.put('/cart/:itemId', maybeUser, async (req, res) => {
     const guestId = getGuest(req, res, config); const query = ownerQuery(req, guestId)
     const cart = await Cart.findOne(query)
     if (!cart) throw fail(404, 'Cart item not found.', 'NOT_FOUND')
@@ -546,13 +595,13 @@ export function createApp(options = {}) {
     if (!product?.isActive || !variant || quantity > variant.stock || !(await Category.exists({ name: product.category, isActive: true }))) throw fail(409, 'Requested quantity is not in stock.', 'INSUFFICIENT_STOCK')
     line.quantity = quantity; await cart.save(); envelope(res, await populatedCart(query, guestId))
   })
-  api.delete('/cart/:itemId', customer, async (req, res) => {
+  api.delete('/cart/:itemId', maybeUser, async (req, res) => {
     const guestId = getGuest(req, res, config); const query = ownerQuery(req, guestId)
     const cart = await Cart.findOne(query)
     if (!cart || !cart.items.id(req.params.itemId)) throw fail(404, 'Cart item not found.', 'NOT_FOUND')
     cart.items.id(req.params.itemId).deleteOne(); await cart.save(); envelope(res, await populatedCart(query, guestId))
   })
-  api.delete('/cart', customer, async (req, res) => {
+  api.delete('/cart', maybeUser, async (req, res) => {
     const guestId = getGuest(req, res, config); const query = ownerQuery(req, guestId)
     await Cart.findOneAndUpdate(query, { $set: { items: [] } }, { upsert: true, setDefaultsOnInsert: true })
     envelope(res, { items: [], subtotal: 0, discount: 0, shipping: 0, total: 0 })
@@ -564,7 +613,7 @@ export function createApp(options = {}) {
     const items = (wishlist?.products || []).filter((product) => product?.isActive).map(asProduct)
     envelope(res, { items, ids: wishlist?.legacyIds || [] })
   })
-  api.post('/wishlist/:productId', customer, async (req, res) => {
+  api.post('/wishlist/:productId', maybeUser, async (req, res) => {
     const guestId = getGuest(req, res, config); const query = ownerQuery(req, guestId)
     const product = await findProduct(req.params.productId)
     if (!product || !product.isActive || !(await Category.exists({ name: product.category, isActive: true }))) throw fail(404, 'Product not found.', 'NOT_FOUND')
@@ -578,7 +627,7 @@ export function createApp(options = {}) {
     }
     envelope(res, { items: wishlist.products.filter((item) => item.isActive).map(asProduct), ids: wishlist.legacyIds })
   })
-  api.delete('/wishlist/:productId', customer, async (req, res) => {
+  api.delete('/wishlist/:productId', maybeUser, async (req, res) => {
     const guestId = getGuest(req, res, config); const query = ownerQuery(req, guestId)
     const product = await findProduct(req.params.productId)
     const wishlist = await Wishlist.findOne(query)
@@ -587,14 +636,79 @@ export function createApp(options = {}) {
     envelope(res, { items: (fresh?.products || []).filter((item) => item.isActive).map(asProduct), ids: fresh?.legacyIds || [] })
   })
 
-  api.post('/orders', customer, async (req, res) => {
+  const razorpayKeyId = config.razorpayKeyId || (options.razorpay ? options.razorpayKeyId || 'rzp_test_mock' : '')
+  const razorpayKeySecret = config.razorpayKeySecret || (options.razorpay ? options.razorpayKeySecret || 'rzp_secret_mock' : '')
+  const razorpayWebhookSecret = config.razorpayWebhookSecret || options.razorpayWebhookSecret || ''
+  const razorpayClient = options.razorpay || (razorpayKeyId && razorpayKeySecret ? new Razorpay({ key_id: razorpayKeyId, key_secret: razorpayKeySecret }) : null)
+
+  const orderResponsePayload = (order, extras = {}) => {
+    const payload = { order: asOrder(order), ...extras }
+    if (order?.paymentMethod === 'razorpay' && order?.paymentStatus === 'pending' && order?.orderStatus !== 'cancelled' && order?.razorpayOrderId) {
+      payload.razorpayOrder = {
+        id: order.razorpayOrderId,
+        amount: Math.round(order.total * 100),
+        currency: order.currency || 'INR',
+        receipt: order.orderNumber,
+      }
+      payload.razorpayKeyId = razorpayKeyId
+    }
+    return payload
+  }
+
+  const verifyRazorpaySignature = (payload, secret, signature) => {
+    if (!secret || typeof signature !== 'string' || !/^[a-f0-9]+$/i.test(signature)) return false
+    const expected = crypto.createHmac('sha256', secret).update(payload).digest()
+    const provided = Buffer.from(signature, 'hex')
+    return expected.length === provided.length && crypto.timingSafeEqual(expected, provided)
+  }
+
+  const canAccessOrderPayment = (req, order) => {
+    if (order.user) return Boolean(req.user && order.user.toString() === req.user._id.toString())
+    if (order.guestId) return req.cookies?.[guestCookieName] === order.guestId
+    return false
+  }
+
+  const clearCartForOrder = async (order) => {
+    if (order.user) await Cart.findOneAndUpdate({ user: order.user }, { $set: { items: [] } })
+    else if (order.guestId) await Cart.findOneAndUpdate({ guestId: order.guestId }, { $set: { items: [] } })
+  }
+
+  const markRazorpayOrderPaid = async (order, paymentId) => {
+    const updated = await Order.findOneAndUpdate(
+      { _id: order._id, paymentStatus: { $in: ['pending', 'failed'] }, orderStatus: { $ne: 'cancelled' } },
+      { $set: { paymentStatus: 'paid', razorpayPaymentId: paymentId, paidAt: new Date(), paymentFailureReason: '' } },
+      { returnDocument: 'after' }
+    )
+    if (updated) await clearCartForOrder(order)
+    return updated
+  }
+
+  const cancelUnpaidRazorpayOrder = async (order, reason) => {
+    const updated = await Order.findOneAndUpdate(
+      { _id: order._id, paymentStatus: { $in: ['pending', 'failed'] }, orderStatus: { $in: ['confirmed', 'processing'] } },
+      { $set: { paymentStatus: 'failed', orderStatus: 'cancelled', paymentFailureReason: reason || 'Payment cancelled by customer' } },
+      { returnDocument: 'after' }
+    )
+    if (updated) {
+      await restoreStock(updated.items.map((item) => ({ productId: item.product, size: item.size, color: item.color, quantity: item.quantity })))
+    }
+    return updated
+  }
+
+  api.get('/payment/razorpay/config', (_req, res) => {
+    envelope(res, { enabled: Boolean(razorpayClient), keyId: razorpayClient ? razorpayKeyId : '' })
+  })
+
+  api.post('/orders', maybeUser, async (req, res) => {
     const idempotencyKey = requestText(req.get('Idempotency-Key') || req.body.idempotencyKey, 'Idempotency key', { max: 100, required: true })
     if (!idempotencyKey || !/^[A-Za-z0-9._:-]{16,100}$/.test(idempotencyKey)) throw fail(400, 'A valid Idempotency-Key header is required.', 'IDEMPOTENCY_KEY_REQUIRED')
+    if (req.body.paymentMethod === 'online') throw fail(422, 'Online payments via generic gateway are unavailable. Please choose Razorpay or Cash on Delivery.', 'GATEWAY_UNAVAILABLE')
     const guestId = req.user ? '' : getGuest(req, res, config)
     const scopedKey = `${req.user ? req.user._id.toString() : guestId}:${idempotencyKey}`
     const previous = await Order.findOne({ idempotencyKey: scopedKey, user: req.user?._id || null })
-    if (previous) return envelope(res, { order: asOrder(previous), reused: true }, 200)
+    if (previous) return envelope(res, orderResponsePayload(previous, { reused: true }), 200)
     const paymentMethod = req.body.paymentMethod === 'razorpay' ? 'razorpay' : 'cod'
+    if (paymentMethod === 'razorpay' && !razorpayClient) throw fail(503, 'Online payments via Razorpay are currently unavailable. Please choose Cash on Delivery.', 'RAZORPAY_UNAVAILABLE')
     const cartQuery = ownerQuery(req, guestId)
     const cart = await Cart.findOne(cartQuery).populate('items.product')
     if (!cart?.items.length) throw fail(400, 'Your bag is empty.', 'EMPTY_CART')
@@ -619,51 +733,148 @@ export function createApp(options = {}) {
         decremented.push({ productId: product._id, size: line.size, color: line.color, quantity: line.quantity })
         subtotal += product.price * line.quantity
         discount += Math.max(0, product.originalPrice - product.price) * line.quantity
-        itemSnapshots.push({ product: product._id, productId: product.legacyId || product.id, name: product.name, image: product.images[0] || '', size: line.size, color: line.color, quantity: line.quantity, unitPrice: product.price, originalUnitPrice: product.originalPrice })
+        const colorEntry = product.colorImages?.find(ci => ci.color?.toLowerCase() === line.color?.toLowerCase())
+        const itemImage = colorEntry?.images?.[0] || product.images?.[0] || ''
+        itemSnapshots.push({ product: product._id, productId: product.legacyId || product.id, name: product.name, image: itemImage, size: line.size, color: line.color, quantity: line.quantity, unitPrice: product.price, originalUnitPrice: product.originalPrice })
       }
       const shipping = subtotal >= 1499 ? 0 : 99
+      const total = subtotal + shipping
       const orderNumber = `LS${new Date().toISOString().slice(2, 10).replaceAll('-', '')}${crypto.randomInt(1000, 9999)}`
-      const order = await Order.create({ orderNumber, idempotencyKey: scopedKey, user: req.user?._id || null, buyer, shippingAddress: address, items: itemSnapshots, subtotal, discount, shipping, total: subtotal + shipping, paymentMethod, paymentStatus: 'pending', orderStatus: 'confirmed', notes })
-      await Cart.findOneAndUpdate(cartQuery, { $set: { items: [] } })
 
+      let rzpOrder = null
       if (paymentMethod === 'razorpay') {
-        const rzp = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_dummy', key_secret: process.env.RAZORPAY_KEY_SECRET || 'dummy_secret' })
-        const rzpOrder = await rzp.orders.create({ amount: Math.round((subtotal + shipping) * 100), currency: 'INR', receipt: orderNumber })
-        order.razorpayOrderId = rzpOrder.id
-        await order.save()
-        return envelope(res, { order: asOrder(order), razorpayOrder: rzpOrder }, 201)
+        try {
+          rzpOrder = await razorpayClient.orders.create({
+            amount: Math.round(total * 100),
+            currency: 'INR',
+            receipt: orderNumber,
+            notes: { orderNumber, buyerEmail: buyer.email },
+          })
+        } catch (razorpayError) {
+          if (config.nodeEnv !== 'test') console.error('Razorpay order creation failed:', razorpayError?.error?.description || razorpayError.message)
+          throw fail(502, 'Could not start online payment with Razorpay. Please try again or choose Cash on Delivery.', 'RAZORPAY_ORDER_FAILED')
+        }
       }
 
-      return envelope(res, { order: asOrder(order) }, 201)
+      const order = await Order.create({
+        orderNumber,
+        idempotencyKey: scopedKey,
+        user: req.user?._id || null,
+        guestId: req.user ? '' : guestId,
+        buyer,
+        shippingAddress: address,
+        items: itemSnapshots,
+        subtotal,
+        discount,
+        shipping,
+        total,
+        paymentMethod,
+        paymentStatus: 'pending',
+        razorpayOrderId: rzpOrder?.id || undefined,
+        orderStatus: 'confirmed',
+        notes,
+      })
+
+      if (paymentMethod === 'cod') {
+        await Cart.findOneAndUpdate(cartQuery, { $set: { items: [] } })
+      }
+
+      if (req.user) {
+        try {
+          saveUserContactAndAddress(req.user, {
+            contactEmail: buyer.email,
+            phone: buyer.phone,
+            address: { ...address, phone: buyer.phone },
+            makeDefault: true,
+          })
+          await req.user.save()
+        } catch (profileError) {
+          console.warn('Could not save user contact/address after order:', profileError.message)
+        }
+      }
+
+      if (paymentMethod === 'razorpay') {
+        return envelope(res, orderResponsePayload(order, { user: req.user ? req.user.toJSON() : null }), 201)
+      }
+
+      return envelope(res, { order: asOrder(order), user: req.user ? req.user.toJSON() : null }, 201)
     } catch (error) {
       await restoreStock(decremented)
       if (error.code === 11000 && error.keyPattern?.idempotencyKey) {
-        const existing = await Order.findOne({ idempotencyKey: scopedKey, user: req.user?._id || null }); if (existing) return envelope(res, { order: asOrder(existing), reused: true })
+        const existing = await Order.findOne({ idempotencyKey: scopedKey, user: req.user?._id || null }); if (existing) return envelope(res, orderResponsePayload(existing, { reused: true }))
       }
       throw error
     }
   })
-  api.get('/orders', customer, async (req, res) => {
+  api.get('/orders', signedInCustomer, async (req, res) => {
     const { page, limit, skip } = pagination(req.query)
     const [items, total] = await Promise.all([Order.find({ user: req.user._id }).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(), Order.countDocuments({ user: req.user._id })])
     envelope(res, { items: items.map(asOrder), pagination: { page, limit, total, pages: Math.ceil(total / limit) } })
   })
-  api.post('/payment/razorpay/verify', async (req, res) => {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) throw fail(400, 'Missing payment details.', 'INVALID_PAYMENT')
-    const secret = process.env.RAZORPAY_KEY_SECRET || 'dummy_secret'
-    const generated_signature = crypto.createHmac('sha256', secret).update(razorpay_order_id + '|' + razorpay_payment_id).digest('hex')
-    if (generated_signature !== razorpay_signature) throw fail(400, 'Invalid payment signature.', 'PAYMENT_FAILED')
-    const order = await Order.findOneAndUpdate({ razorpayOrderId: razorpay_order_id }, { $set: { paymentStatus: 'paid', razorpayPaymentId: razorpay_payment_id } }, { new: true })
+  api.post('/payment/razorpay/verify', maybeUser, async (req, res) => {
+    if (!razorpayClient || !razorpayKeySecret) throw fail(503, 'Razorpay verification is not configured on the server.', 'RAZORPAY_UNAVAILABLE')
+    const razorpayOrderId = requestText(req.body.razorpay_order_id, 'Razorpay order ID', { min: 4, max: 120, required: true })
+    const razorpayPaymentId = requestText(req.body.razorpay_payment_id, 'Razorpay payment ID', { min: 4, max: 120, required: true })
+    const razorpaySignature = requestText(req.body.razorpay_signature, 'Razorpay signature', { min: 10, max: 256, required: true })
+    if (!verifyRazorpaySignature(`${razorpayOrderId}|${razorpayPaymentId}`, razorpayKeySecret, razorpaySignature)) {
+      throw fail(400, 'Invalid payment signature.', 'PAYMENT_FAILED')
+    }
+    const order = await Order.findOne({ razorpayOrderId }).select('+guestId')
     if (!order) throw fail(404, 'Order not found.', 'NOT_FOUND')
-    envelope(res, { success: true })
+    if (!canAccessOrderPayment(req, order)) throw fail(403, 'You are not allowed to verify this payment.', 'FORBIDDEN')
+    if (order.paymentStatus === 'paid') {
+      return envelope(res, { verified: true, order: asOrder(order), user: req.user ? req.user.toJSON() : null })
+    }
+    if (order.orderStatus === 'cancelled') throw fail(409, 'This order has already been cancelled.', 'ORDER_CANCELLED')
+    const updated = await markRazorpayOrderPaid(order, razorpayPaymentId)
+    if (!updated) throw fail(409, 'Payment could not be finalized for this order.', 'PAYMENT_CONFLICT')
+    envelope(res, { verified: true, order: asOrder(updated), user: req.user ? req.user.toJSON() : null })
   })
-  api.get('/orders/:id', customer, async (req, res) => {
+  api.post('/payment/razorpay/failure', maybeUser, async (req, res) => {
+    const razorpayOrderId = requestText(req.body.razorpay_order_id, 'Razorpay order ID', { min: 4, max: 120, required: true })
+    const reason = requestText(req.body.reason, 'Failure reason', { max: 200 }) || 'Payment cancelled by customer'
+    const order = await Order.findOne({ razorpayOrderId }).select('+guestId')
+    if (!order) throw fail(404, 'Order not found.', 'NOT_FOUND')
+    if (!canAccessOrderPayment(req, order)) throw fail(403, 'You are not allowed to update this order.', 'FORBIDDEN')
+    if (order.paymentStatus === 'paid') return envelope(res, { cancelled: false, order: asOrder(order) })
+    const updated = await cancelUnpaidRazorpayOrder(order, reason)
+    envelope(res, { cancelled: Boolean(updated), order: asOrder(updated || order) })
+  })
+  api.post('/payment/razorpay/webhook', async (req, res) => {
+    if (!razorpayWebhookSecret) throw fail(503, 'Razorpay webhook secret is not configured.', 'RAZORPAY_WEBHOOK_NOT_CONFIGURED')
+    const signature = req.get('x-razorpay-signature') || ''
+    const rawPayload = req.rawBody || Buffer.from(JSON.stringify(req.body || {}))
+    if (!verifyRazorpaySignature(rawPayload, razorpayWebhookSecret, signature)) {
+      throw fail(400, 'Invalid Razorpay webhook signature.', 'INVALID_SIGNATURE')
+    }
+    const event = cleanText(req.body?.event, 80)
+    const paymentEntity = req.body?.payload?.payment?.entity
+    const orderEntity = req.body?.payload?.order?.entity
+    const rzpOrderId = cleanText(paymentEntity?.order_id || orderEntity?.id, 120)
+    if (rzpOrderId && (event === 'payment.captured' || event === 'order.paid')) {
+      const paymentId = cleanText(paymentEntity?.id, 120)
+      const order = await Order.findOne({ razorpayOrderId: rzpOrderId }).select('+guestId')
+      if (order && order.paymentStatus !== 'paid' && order.orderStatus !== 'cancelled' && paymentId) {
+        await markRazorpayOrderPaid(order, paymentId)
+      }
+    } else if (rzpOrderId && event === 'payment.failed') {
+      const order = await Order.findOne({ razorpayOrderId: rzpOrderId }).select('+guestId')
+      if (order && order.paymentStatus === 'pending' && order.orderStatus !== 'cancelled') {
+        const reason = cleanText(paymentEntity?.error_description || paymentEntity?.error_reason, 200) || 'Payment failed'
+        await Order.updateOne(
+          { _id: order._id, paymentStatus: 'pending', orderStatus: { $ne: 'cancelled' } },
+          { $set: { paymentStatus: 'failed', paymentFailureReason: reason } }
+        )
+      }
+    }
+    envelope(res, { received: true })
+  })
+  api.get('/orders/:id', signedInCustomer, async (req, res) => {
     const order = await Order.findOne({ _id: req.params.id, user: req.user._id })
     if (!order) throw fail(404, 'Order not found.', 'NOT_FOUND')
     envelope(res, { order: asOrder(order) })
   })
-  api.put('/orders/:id/cancel', customer, async (req, res) => {
+  api.put('/orders/:id/cancel', signedInCustomer, async (req, res) => {
     const order = await Order.findOneAndUpdate({ _id: req.params.id, user: req.user._id, orderStatus: { $in: ['confirmed', 'processing'] }, paymentStatus: 'pending' }, { $set: { orderStatus: 'cancelled' } }, { returnDocument: 'after' })
     if (!order) {
       const existing = await Order.findOne({ _id: req.params.id, user: req.user._id }).select('_id')
@@ -724,6 +935,9 @@ export function createApp(options = {}) {
     const order = await Order.findById(req.params.id)
     if (!order) throw fail(404, 'Order not found.', 'NOT_FOUND')
     if (status === order.orderStatus) return envelope(res, { order: asOrder(order) })
+    if (!orderTransitions[order.orderStatus]?.includes(status)) {
+      throw fail(409, `Cannot transition order status from ${order.orderStatus} to ${status}.`, 'INVALID_TRANSITION')
+    }
     const filter = { _id: order._id, orderStatus: order.orderStatus }
     if (status === 'cancelled') {
       if (order.paymentStatus !== 'pending') throw fail(409, 'Only unpaid orders can be cancelled.', 'ORDER_NOT_CANCELLABLE')
@@ -774,8 +988,23 @@ export function createApp(options = {}) {
     const candidateStatus = Number(error.status || (uploadLimitError ? error.code === 'LIMIT_FILE_SIZE' ? 413 : 400 : duplicate ? 409 : error.name === 'ValidationError' || error.name === 'CastError' ? 400 : 500))
     const status = Number.isInteger(candidateStatus) && candidateStatus >= 400 && candidateStatus <= 599 ? candidateStatus : 500
     const safeInternalCode = typeof error.code === 'string' && /^[A-Z0-9_]{1,40}$/i.test(error.code) ? error.code : 'INTERNAL_ERROR'
-    const code = uploadLimitError ? 'INVALID_UPLOAD' : duplicate ? 'DUPLICATE_RECORD' : status < 500 && error.code && typeof error.code === 'string' ? error.code : status === 500 ? 'INTERNAL_ERROR' : 'VALIDATION_ERROR'
-    const message = uploadLimitError ? error.code === 'LIMIT_FILE_SIZE' ? 'Each image must be 5 MB or smaller.' : 'Choose up to 8 images in one upload.' : status === 500 ? 'Something went wrong.' : error.message || 'Something went wrong.'
+    const code = uploadLimitError ? 'INVALID_UPLOAD' : duplicate ? 'DUPLICATE_RECORD' : status !== 500 && error.code && typeof error.code === 'string' ? safeInternalCode : status === 500 ? 'INTERNAL_ERROR' : 'VALIDATION_ERROR'
+    let message = uploadLimitError ? error.code === 'LIMIT_FILE_SIZE' ? 'Each image must be 5 MB or smaller.' : 'Choose up to 8 images in one upload.' : status === 500 ? 'Something went wrong.' : error.message || 'Something went wrong.'
+    if (duplicate) {
+      if (error.keyPattern?.slug || (error.message && error.message.includes('slug_1'))) {
+        const valMatch = error.message?.match(/dup key: \{ [^:]*: "([^"]+)" \}/) || error.message?.match(/slug: "([^"]+)"/)
+        const duplicateVal = error.keyValue?.slug || (valMatch ? valMatch[1] : '')
+        message = duplicateVal
+          ? `A product named "${duplicateVal}" already exists in your catalog. Please choose a different product name.`
+          : 'A product with this name or slug already exists in your catalog. Please choose a different product name.'
+      } else if (error.keyPattern?.email || (error.message && error.message.includes('email_1'))) {
+        message = 'An account with this email address already exists.'
+      } else if (error.keyPattern?.legacyId || (error.message && error.message.includes('legacyId_1'))) {
+        message = 'A product with this ID already exists.'
+      } else {
+        message = 'A record with this information already exists.'
+      }
+    }
     if (status === 500 && config.nodeEnv !== 'test') console.error('Unhandled API error', { name: /^[A-Za-z0-9_]{1,60}$/.test(error.name || '') ? error.name : 'Error', code: safeInternalCode })
     res.status(status).json({ success: false, error: { code, message } })
   })
@@ -838,6 +1067,34 @@ async function productCategory(value) {
   if (!category) throw fail(400, 'Choose an active product category.', 'INVALID_PRODUCT')
   return category.name
 }
+function normalizeColorImages(input, productColors = []) {
+  if (input === undefined || input === null) return []
+  let entries = []
+  if (Array.isArray(input)) {
+    entries = input
+  } else if (typeof input === 'object') {
+    entries = Object.entries(input).map(([color, images]) => ({ color, images }))
+  } else {
+    throw fail(400, 'Color images must be an array or object mapping colors to images.', 'INVALID_PRODUCT')
+  }
+
+  const result = []
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue
+    const color = typeof entry.color === 'string' ? entry.color.trim() : ''
+    if (!color || color.length > 40) continue
+    const rawImages = Array.isArray(entry.images) ? entry.images : []
+    const images = rawImages
+      .filter((img) => typeof img === 'string' && img.trim().length > 0 && img.length <= 500)
+      .map((img) => img.trim())
+    if (images.some((image) => !(/^\/(?!\/)/.test(image) || /^https?:\/\//i.test(image)))) {
+      throw fail(400, 'Images must use a local path or an HTTP(S) URL.', 'INVALID_PRODUCT')
+    }
+    result.push({ color, images })
+  }
+  return result
+}
+
 async function buildProduct(body) {
   const name = requestText(body.name, 'Product name', { min: 2, max: 160, required: true }); const category = await productCategory(body.category)
   const price = numberInput(body.price, 'Price', { min: 1 })
@@ -851,8 +1108,14 @@ async function buildProduct(body) {
   if (body.stock !== undefined && body.variants !== undefined && variants.reduce((sum, variant) => sum + variant.stock, 0) !== stock) throw fail(400, 'Stock must equal the total stock across variants.', 'INVALID_PRODUCT')
   const originalPrice = body.originalPrice === undefined ? price : numberInput(body.originalPrice, 'Original price', { min: 1 })
   if (originalPrice < price) throw fail(400, 'Original price cannot be lower than the selling price.', 'INVALID_PRODUCT')
-  const images = stringArrayInput(body.images, 'Images', { maxItems: 8, maxLength: 500, fallback: ['/assets/products/girl-01.jpg'] })
+  const colorImages = normalizeColorImages(body.colorImages, colors)
+  let images = stringArrayInput(body.images, 'Images', { maxItems: 60, maxLength: 500, fallback: [] })
   if (images.some((image) => !(/^\/(?!\/)/.test(image) || /^https?:\/\//i.test(image)))) throw fail(400, 'Images must use a local path or an HTTP(S) URL.', 'INVALID_PRODUCT')
+  if (colorImages.length > 0) {
+    const allColorImages = colorImages.flatMap((c) => c.images)
+    images = [...new Set([...images, ...allColorImages])].filter(Boolean)
+  }
+  if (!images.length) images = ['/assets/products/girl-01.jpg']
   const ageRange = stringArrayInput(body.ageRange, 'Age ranges', { maxItems: 10, maxLength: 20 })
   const occasion = stringArrayInput(body.occasion, 'Occasions', { maxItems: 20, maxLength: 60 })
   const tags = stringArrayInput(body.tags, 'Tags', { maxItems: 20, maxLength: 40 })
@@ -863,7 +1126,7 @@ async function buildProduct(body) {
   const description = requestText(body.description, 'Description', { max: 4000 })
   const subcategory = requestText(body.subcategory === undefined ? 'Clothing' : body.subcategory, 'Subcategory', { max: 80, required: true })
   const material = requestText(body.material, 'Material', { max: 200 })
-  return { legacyId: legacyId || undefined, name, slug, description, category, subcategory, sizes, ageRange, colors, occasion, price, originalPrice, discount: Math.round((1 - price / originalPrice) * 100), images, material, rating: 0, reviews: 0, featured: body.featured ?? false, newArrival: body.newArrival ?? false, stock: variants.reduce((sum, variant) => sum + variant.stock, 0), variants, tags, isActive: body.isActive ?? true }
+  return { legacyId: legacyId || undefined, name, slug, description, category, subcategory, sizes, ageRange, colors, occasion, price, originalPrice, discount: Math.round((1 - price / originalPrice) * 100), images, colorImages, material, rating: 0, reviews: 0, featured: body.featured ?? false, newArrival: body.newArrival ?? false, stock: variants.reduce((sum, variant) => sum + variant.stock, 0), variants, tags, isActive: body.isActive ?? true }
 }
 function normalizeVariants(input, sizes, colors) {
   if (!Array.isArray(input) || input.length < 1 || input.length > 400 || input.some((variant) => !variant || typeof variant !== 'object' || Array.isArray(variant))) throw fail(400, 'Variants must contain between 1 and 400 objects.', 'INVALID_PRODUCT')
@@ -890,13 +1153,20 @@ function generatedVariants(sizes, colors, totalStock) {
 async function updateProduct(product, body) {
   const oldStock = product.variants.reduce((sum, variant) => sum + variant.stock, 0)
   const variantsChanged = (body.sizes !== undefined && JSON.stringify(body.sizes) !== JSON.stringify(product.sizes)) || (body.colors !== undefined && JSON.stringify(body.colors) !== JSON.stringify(product.colors))
-  const allowed = ['name', 'description', 'category', 'subcategory', 'sizes', 'ageRange', 'colors', 'occasion', 'price', 'originalPrice', 'images', 'material', 'featured', 'newArrival', 'tags', 'isActive']
-  const arrayFields = { sizes: [30, 20], ageRange: [10, 20], colors: [20, 40], occasion: [20, 60], images: [8, 500], tags: [20, 40] }
+  const allowed = ['name', 'description', 'category', 'subcategory', 'sizes', 'ageRange', 'colors', 'occasion', 'price', 'originalPrice', 'images', 'colorImages', 'material', 'featured', 'newArrival', 'tags', 'isActive']
+  const arrayFields = { sizes: [30, 20], ageRange: [10, 20], colors: [20, 40], occasion: [20, 60], images: [60, 500], tags: [20, 40] }
   const textFields = { description: 4000, subcategory: 80, material: 200 }
   booleanInput(body, ['featured', 'newArrival', 'isActive'])
   if (body.name !== undefined) product.name = requestText(body.name, 'Product name', { min: 2, max: 160, required: true })
   for (const [field, maxLength] of Object.entries(textFields)) if (body[field] !== undefined && (typeof body[field] !== 'string' || body[field].length > maxLength)) throw fail(400, `${field} must be a string of up to ${maxLength} characters.`, 'INVALID_PRODUCT')
   for (const [field, [maxItems, maxLength]] of Object.entries(arrayFields)) if (body[field] !== undefined) product[field] = stringArrayInput(body[field], field, { maxItems, maxLength })
+  if (body.colorImages !== undefined) {
+    product.colorImages = normalizeColorImages(body.colorImages, product.colors)
+    if (product.colorImages.length > 0) {
+      const allColorImages = product.colorImages.flatMap((c) => c.images)
+      product.images = [...new Set([...(product.images || []), ...allColorImages])].filter(Boolean)
+    }
+  }
   if (body.images !== undefined && product.images.some((image) => !(/^\/(?!\/)/.test(image) || /^https?:\/\//i.test(image)))) throw fail(400, 'Images must use a local path or an HTTP(S) URL.', 'INVALID_PRODUCT')
   if (body.category !== undefined) product.category = await productCategory(body.category)
   if (body.price !== undefined) product.price = numberInput(body.price, 'Price', { min: 1 })
@@ -931,15 +1201,10 @@ async function updateProduct(product, body) {
 }
 async function removeProductReferences(product) {
   const productId = product._id
-  const legacyId = product.legacyId
+  const idStr = product.legacyId || product.id || product._id?.toString()
   
   await Cart.updateMany({}, { $pull: { items: { product: productId } } })
-  
-  if (legacyId) {
-    await Wishlist.updateMany({}, { $pull: { products: productId, legacyIds: legacyId } })
-  } else {
-    await Wishlist.updateMany({}, { $pull: { products: productId } })
-  }
+  await Wishlist.updateMany({}, { $pull: { products: productId, legacyIds: { $in: [idStr, productId.toString()] } } })
 }
 async function removeCategoryReferences(categoryName) {
   const products = await Product.find({ category: categoryName }).select('_id legacyId').lean()
@@ -951,6 +1216,50 @@ async function removeCategoryReferences(categoryName) {
     Wishlist.updateMany({}, { $pull: { products: { $in: productIds }, legacyIds: { $in: legacyIds } } }),
   ])
 }
+function saveUserContactAndAddress(user, { contactEmail, phone, address, label = 'Home', makeDefault = true } = {}) {
+  if (!user) return
+  if (phone) user.phone = phone
+  if (contactEmail) user.contactEmail = contactEmail.toLowerCase()
+  if (!address) return
+
+  const norm = (value) => String(value || '').trim().toLowerCase()
+  const existing = user.addresses.find((entry) =>
+    norm(entry.fullName) === norm(address.fullName) &&
+    norm(entry.line1) === norm(address.line1) &&
+    norm(entry.city) === norm(address.city) &&
+    norm(entry.postalCode) === norm(address.postalCode) &&
+    norm(entry.landmark) === norm(address.landmark)
+  )
+
+  const shouldDefault = makeDefault || user.addresses.length === 0
+  if (shouldDefault) {
+    user.addresses.forEach((entry) => { entry.isDefault = false })
+  }
+
+  if (existing) {
+    if (address.phone) existing.phone = address.phone
+    if (address.line2 !== undefined) existing.line2 = address.line2
+    if (address.state !== undefined) existing.state = address.state
+    if (address.country) existing.country = address.country
+    if (label && !existing.label) existing.label = label
+    if (shouldDefault) existing.isDefault = true
+  } else {
+    user.addresses.push({
+      label: label || 'Home',
+      fullName: address.fullName,
+      phone: address.phone || user.phone || '',
+      line1: address.line1,
+      line2: address.line2 || '',
+      city: address.city,
+      state: address.state || '',
+      postalCode: address.postalCode,
+      country: address.country || 'India',
+      landmark: address.landmark || '',
+      isDefault: shouldDefault,
+    })
+  }
+}
+
 async function restoreStock(changes) {
   for (const change of changes) await Product.updateOne({ _id: change.productId, 'variants.size': change.size, 'variants.color': change.color }, { $inc: { 'variants.$.stock': change.quantity, stock: change.quantity } })
 }

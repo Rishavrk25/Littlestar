@@ -11,13 +11,18 @@ const addressSchema = new Schema({
   state: { type: String, trim: true, maxlength: 80, default: '' },
   postalCode: { type: String, trim: true, match: /^\d{6}$/, required: true },
   country: { type: String, trim: true, maxlength: 60, default: 'India' },
+  landmark: { type: String, trim: true, maxlength: 120, default: '' },
+  isDefault: { type: Boolean, default: false },
 }, { _id: true })
 
 const UserSchema = new Schema({
   name: { type: String, required: true, trim: true, minlength: 2, maxlength: 120 },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true, maxlength: 254, index: true },
-  phone: { type: String, trim: true, maxlength: 20, default: '' },
-  passwordHash: { type: String, required: true, select: false },
+  contactEmail: { type: String, lowercase: true, trim: true, maxlength: 254, default: '' },
+  phone: { type: String, trim: true, maxlength: 20, default: '', index: true },
+  passwordHash: { type: String, select: false },
+  googleId: { type: String, sparse: true, index: true },
+  authProvider: { type: String, enum: ['local', 'google', 'phone'], default: 'local' },
   role: { type: String, enum: ['customer', 'admin'], default: 'customer', index: true },
   addresses: { type: [addressSchema], default: [] },
   isActive: { type: Boolean, default: true, index: true },
@@ -30,6 +35,11 @@ const variantSchema = new Schema({
   sku: { type: String, trim: true, maxlength: 64, default: '' },
   stock: { type: Number, min: 0, default: 0 },
 }, { _id: true })
+
+const colorImageSchema = new Schema({
+  color: { type: String, trim: true, required: true, maxlength: 40 },
+  images: { type: [String], default: [] },
+}, { _id: false })
 
 const ProductSchema = new Schema({
   legacyId: { type: String, trim: true, unique: true, sparse: true, index: true },
@@ -46,6 +56,7 @@ const ProductSchema = new Schema({
   originalPrice: { type: Number, required: true, min: 1 },
   discount: { type: Number, min: 0, max: 100, default: 0 },
   images: { type: [String], default: [] },
+  colorImages: { type: [colorImageSchema], default: [] },
   material: { type: String, trim: true, maxlength: 200, default: '' },
   rating: { type: Number, min: 0, max: 5, default: 0 },
   reviews: { type: Number, min: 0, default: 0 },
@@ -101,6 +112,7 @@ const OrderSchema = new Schema({
   orderNumber: { type: String, required: true, unique: true, index: true },
   idempotencyKey: { type: String, required: true, unique: true, index: true },
   user: { type: Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+  guestId: { type: String, default: '', select: false },
   buyer: { name: { type: String, required: true }, email: { type: String, required: true, lowercase: true }, phone: { type: String, required: true } },
   shippingAddress: { fullName: { type: String, required: true }, line1: { type: String, required: true }, line2: { type: String, default: '' }, city: { type: String, required: true }, state: { type: String, default: '' }, postalCode: { type: String, required: true }, country: { type: String, default: 'India' }, landmark: { type: String, default: '' } },
   items: { type: [orderItemSchema], required: true },
@@ -113,6 +125,8 @@ const OrderSchema = new Schema({
   paymentStatus: { type: String, enum: ['pending', 'paid', 'failed', 'refunded'], default: 'pending' },
   razorpayOrderId: { type: String, index: true },
   razorpayPaymentId: { type: String, index: true },
+  paidAt: { type: Date, default: null },
+  paymentFailureReason: { type: String, trim: true, maxlength: 200, default: '' },
   orderStatus: { type: String, enum: ['confirmed', 'processing', 'shipped', 'delivered', 'cancelled'], default: 'confirmed', index: true },
   notes: { type: String, trim: true, maxlength: 500, default: '' },
 }, { timestamps: true })

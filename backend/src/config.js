@@ -18,6 +18,9 @@ export function getConfig(env = process.env) {
     adminName: env.ADMIN_NAME || 'Little Star Admin',
     rateLimitWindowMs: Number(env.RATE_LIMIT_WINDOW_MS || 900000),
     rateLimitMax: Number(env.RATE_LIMIT_MAX || 150),
+    razorpayKeyId: (env.RAZORPAY_KEY_ID || '').trim(),
+    razorpayKeySecret: (env.RAZORPAY_KEY_SECRET || '').trim(),
+    razorpayWebhookSecret: (env.RAZORPAY_WEBHOOK_SECRET || '').trim(),
   }
 }
 
@@ -36,5 +39,6 @@ export function assertRuntimeConfig(config = getConfig()) {
   if (Boolean(config.adminEmail) !== Boolean(config.adminPassword)) throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD must be configured together.')
   if (config.adminEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.adminEmail)) throw new Error('ADMIN_EMAIL must be a valid email address.')
   if (config.adminPassword && (config.adminPassword.length < 12 || Buffer.byteLength(config.adminPassword, 'utf8') > 72)) throw new Error('ADMIN_PASSWORD must contain at least 12 characters and no more than 72 UTF-8 bytes.')
+  if (Boolean(config.razorpayKeyId) !== Boolean(config.razorpayKeySecret)) throw new Error('RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must be configured together.')
   return config
 }

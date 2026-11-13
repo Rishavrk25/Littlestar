@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { unlink } from 'node:fs/promises'
@@ -24,6 +25,7 @@ test('API integration: catalog, auth, cart, wishlist, checkout, admin, and conta
   assert.throws(() => assertRuntimeConfig(getConfig({ ...validEnvironment, NODE_ENV: 'production', MONGODB_URI: '' })), /MONGODB_URI/)
   assert.throws(() => assertRuntimeConfig(getConfig({ ...validEnvironment, COOKIE_SAME_SITE: 'none', COOKIE_SECURE: 'false' })), /COOKIE_SECURE/)
   assert.throws(() => assertRuntimeConfig(getConfig({ ...validEnvironment, RATE_LIMIT_MAX: '0' })), /Rate-limit/)
+  assert.throws(() => assertRuntimeConfig(getConfig({ ...validEnvironment, RAZORPAY_KEY_ID: 'rzp_test_only' })), /RAZORPAY_KEY_ID/)
   await mongoose.connect(mongoUri)
   await mongoose.connection.dropDatabase()
   await Promise.all([User.init(), Product.init(), Category.init(), Cart.init(), Wishlist.init(), Order.init(), ContactMessage.init()])
@@ -47,8 +49,8 @@ test('API integration: catalog, auth, cart, wishlist, checkout, admin, and conta
     for (const value of setCookies) {
       const pair = value.split(';', 1)[0]
       if (pair.startsWith('ls_guest=')) guestCookie = pair
-      if (pair.startsWith('ls_session=')) {
-        if (cookie.includes('admin@example.test')) adminCookie = pair
+      if (pair.startsWith('ls_session=') || pair.startsWith('ls_admin_session=')) {
+        if (cookie.includes('admin@example.test') || pair.startsWith('ls_admin_session=')) adminCookie = pair
       }
     }
     return { status: response.status, headers: response.headers, body: await response.json() }
@@ -62,7 +64,7 @@ test('API integration: catalog, auth, cart, wishlist, checkout, admin, and conta
   const captureSession = async (path, body, initialCookie = guestCookie) => {
     const response = await fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(initialCookie ? { Cookie: initialCookie } : {}) }, body: JSON.stringify(body) })
     const setCookies = response.headers.getSetCookie?.() || []
-    const cookie = setCookies.map((value) => value.split(';', 1)[0]).find((value) => value.startsWith('ls_session=')) || ''
+    const cookie = setCookies.map((value) => value.split(';', 1)[0]).find((value) => value.startsWith('ls_session=') || value.startsWith('ls_admin_session=')) || ''
     const payload = await response.json()
     return { status: response.status, body: payload, cookie, setCookies }
   }
@@ -123,13 +125,23 @@ test('API integration: catalog, auth, cart, wishlist, checkout, admin, and conta
     const me = await request('/auth/me', { cookie: userCookie }); assert.equal(me.body.data.user.email, 'aarav@example.test')
     assert.equal((await request('/auth/addresses', { cookie: userCookie })).body.data.addresses.length, 0)
     assert.equal((await request('/auth/addresses', { method: 'POST', cookie: userCookie, body: { fullName: 'Aarav Sharma', line1: '12 Little Street', city: 'Darbhanga', postalCode: 'bad' } })).status, 400)
-    const addressResponse = await request('/auth/addresses', { method: 'POST', cookie: userCookie, body: { fullName: 'Aarav Sharma', phone: '+91 98765 43210', line1: '12 Little Street', city: 'Darbhanga', postalCode: '846001' } })
-    assert.equal(addressResponse.status, 201, JSON.stringify(addressResponse.body)); assert.equal(addressResponse.body.data.addresses.length, 1)
+    const addressResponse = await request('/auth/addresses', { method: 'POST', cookie: userCookie, body: { fullName: 'Aarav Sharma', phone: '+91 98765 43210', line1: '12 Little Street', city: 'Darbhanga', postalCode: '846001', landmark: 'Near Clock Tower' } })
+    assert.equal(addressResponse.status, 201, JSON.stringify(addressResponse.body)); assert.equal(addressResponse.body.data.addresses.length, 1); assert.equal(addressResponse.body.data.addresses[0].landmark, 'Near Clock Tower'); assert.equal(addressResponse.body.data.addresses[0].isDefault, true)
+    const secondAddressResponse = await request('/auth/addresses', { method: 'POST', cookie: userCookie, body: { label: 'Office', fullName: 'Aarav Sharma', phone: '+91 98765 43210', line1: '45 Market Road', city: 'Darbhanga', postalCode: '846004', landmark: 'Opposite Park', isDefault: false } })
+    assert.equal(secondAddressResponse.status, 201); assert.equal(secondAddressResponse.body.data.addresses.length, 2)
+    const firstAddressId = addressResponse.body.data.addresses[0]._id
+    const secondAddressId = secondAddressResponse.body.data.addresses[1]._id
+    const setDefaultResponse = await request(`/auth/addresses/${secondAddressId}/default`, { method: 'PUT', cookie: userCookie })
+    assert.equal(setDefaultResponse.status, 200); assert.equal(setDefaultResponse.body.data.addresses.find((item) => item._id === secondAddressId).isDefault, true); assert.equal(setDefaultResponse.body.data.addresses.find((item) => item._id === firstAddressId).isDefault, false)
     assert.equal((await request('/auth/addresses/not-an-id', { method: 'DELETE', cookie: userCookie })).status, 404)
-    assert.equal((await request('/auth/addresses/' + addressResponse.body.data.addresses[0]._id, { method: 'DELETE', cookie: userCookie })).body.data.addresses.length, 0)
+    const afterDeleteSecond = await request('/auth/addresses/' + secondAddressId, { method: 'DELETE', cookie: userCookie })
+    assert.equal(afterDeleteSecond.body.data.addresses.length, 1); assert.equal(afterDeleteSecond.body.data.addresses[0].isDefault, true)
+    assert.equal((await request('/auth/addresses/' + firstAddressId, { method: 'DELETE', cookie: userCookie })).body.data.addresses.length, 0)
     assert.equal((await request('/auth/me', { method: 'PUT', cookie: userCookie, body: { name: 'Aarav S', phone: 9876543210 } })).status, 400)
     assert.equal((await request('/auth/me', { method: 'PUT', cookie: userCookie, body: { name: 'A', phone: '+91 98765 43210' } })).status, 400)
-    assert.equal((await request('/auth/me', { method: 'PUT', cookie: userCookie, body: { name: 'Aarav S', phone: '+91 98765 43210' } })).body.data.user.phone, '+91 98765 43210')
+    assert.equal((await request('/auth/me', { method: 'PUT', cookie: userCookie, body: { name: 'Aarav S', phone: '+91 98765 43210', contactEmail: 'bad-email' } })).status, 400)
+    const updatedMe = await request('/auth/me', { method: 'PUT', cookie: userCookie, body: { name: 'Aarav S', phone: '+91 98765 43210', contactEmail: 'contact@aarav.test' } })
+    assert.equal(updatedMe.body.data.user.phone, '+91 98765 43210'); assert.equal(updatedMe.body.data.user.contactEmail, 'contact@aarav.test')
     assert.equal((await request('/orders', { headers: { Authorization: 'Bearer invalid.token.value' } })).status, 401)
     const merged = await request('/cart', { cookie: userCookie }); assert.equal(merged.body.data.items.length, 1); assert.equal(merged.body.data.items[0].quantity, 3)
     assert.deepEqual((await request('/wishlist', { cookie: userCookie })).body.data.ids, ['g1'])
@@ -139,8 +151,11 @@ test('API integration: catalog, auth, cart, wishlist, checkout, admin, and conta
 
   await t.test('COD order uses server totals, is idempotent, and cancellation restores stock', async () => {
     const before = await Product.findById(product._id).lean()
-    const response = await request('/orders', { method: 'POST', cookie: userCookie, headers: { 'Idempotency-Key': 'order-test-key-0001-long' }, body: { name: 'Aarav Sharma', email: 'aarav@example.test', phone: '+91 98765 43210', paymentMethod: 'cod', price: 1, subtotal: 1, discount: 100000, shipping: 0, total: 1, address: { fullName: 'Aarav Sharma', line1: '12 Little Street', city: 'Darbhanga', postalCode: '846001' } } })
+    const response = await request('/orders', { method: 'POST', cookie: userCookie, headers: { 'Idempotency-Key': 'order-test-key-0001-long' }, body: { name: 'Aarav Sharma', email: 'checkout@aarav.test', phone: '+91 98765 43210', paymentMethod: 'cod', price: 1, subtotal: 1, discount: 100000, shipping: 0, total: 1, address: { fullName: 'Aarav Sharma', line1: '12 Little Street', city: 'Darbhanga', postalCode: '846001', landmark: 'Near Clock Tower' } } })
     assert.equal(response.status, 201); const order = response.body.data.order; assert.equal(order.subtotal, 2997); assert.equal(order.shipping, 0); assert.equal(order.total, 2997); assert.equal(order.paymentStatus, 'pending')
+    assert.equal(response.body.data.user.contactEmail, 'checkout@aarav.test'); assert.equal(response.body.data.user.phone, '+91 98765 43210'); assert.equal(response.body.data.user.addresses.length, 1); assert.equal(response.body.data.user.addresses[0].landmark, 'Near Clock Tower'); assert.equal(response.body.data.user.addresses[0].isDefault, true)
+    const meAfterOrder = await request('/auth/me', { cookie: userCookie })
+    assert.equal(meAfterOrder.body.data.user.contactEmail, 'checkout@aarav.test'); assert.equal(meAfterOrder.body.data.user.addresses.length, 1); assert.equal(meAfterOrder.body.data.user.addresses[0].line1, '12 Little Street')
     customerOrderId = order._id
     assert.equal((await request(`/orders/${order._id}`, { cookie: userCookie })).body.data.order.total, 2997)
     const replay = await request('/orders', { method: 'POST', cookie: userCookie, headers: { 'Idempotency-Key': 'order-test-key-0001-long' }, body: {} }); assert.equal(replay.body.data.reused, true); assert.equal(replay.body.data.order._id, order._id)
@@ -148,6 +163,11 @@ test('API integration: catalog, auth, cart, wishlist, checkout, admin, and conta
     assert.equal((await request('/orders', { method: 'POST', cookie: userCookie, headers: { 'Idempotency-Key': 'order-test-online-0001-long' }, body: { paymentMethod: 'online' } })).status, 422)
     const cancelled = await request(`/orders/${order._id}/cancel`, { method: 'PUT', cookie: userCookie }); assert.equal(cancelled.status, 200); assert.equal(cancelled.body.data.order.orderStatus, 'cancelled')
     const after = await Product.findById(product._id).lean(); assert.equal(after.stock, before.stock)
+    const addSecondCart = await request('/cart', { method: 'POST', cookie: userCookie, body: { productId: 'g1', size: '4-5Y', color: 'Rose', quantity: 1 } })
+    assert.equal(addSecondCart.status, 201, JSON.stringify(addSecondCart.body))
+    const secondOrder = await request('/orders', { method: 'POST', cookie: userCookie, headers: { 'Idempotency-Key': 'order-test-key-0002-long' }, body: { name: 'Aarav Sharma', email: 'checkout@aarav.test', phone: '+91 98765 43210', paymentMethod: 'cod', address: { fullName: 'Aarav Sharma', line1: '12 Little Street', city: 'Darbhanga', postalCode: '846001', landmark: 'Near Clock Tower' } } })
+    assert.equal(secondOrder.status, 201, JSON.stringify(secondOrder.body)); assert.equal(secondOrder.body.data.user.addresses.length, 1)
+    assert.equal((await request(`/orders/${secondOrder.body.data.order._id}/cancel`, { method: 'PUT', cookie: userCookie })).status, 200)
     assert.equal((await request('/cart', { method: 'DELETE', cookie: userCookie })).status, 200)
     assert.equal((await request('/orders', { method: 'POST', cookie: userCookie, headers: { 'Idempotency-Key': 'order-empty-cart-key-0001' }, body: { name: 'Aarav Sharma', email: 'aarav@example.test', phone: '+91 98765 43210', address: { fullName: 'Aarav Sharma', line1: '12 Little Street', city: 'Darbhanga', postalCode: '846001' } } })).status, 400)
   })
@@ -251,6 +271,48 @@ test('API integration: catalog, auth, cart, wishlist, checkout, admin, and conta
     const removable = await request('/categories', { method: 'POST', cookie: adminCookie, body: { name: 'Temporary Category' } })
     assert.equal(removable.status, 201)
     assert.equal((await request(`/categories/${removable.body.data._id}`, { method: 'DELETE', cookie: adminCookie })).body.data.category.isActive, false)
+  })
+
+  await t.test('admin can manage images categorized by color for products', async () => {
+    const res = await request('/products', {
+      method: 'POST',
+      cookie: adminCookie,
+      body: {
+        name: 'Color Rainbow Frock',
+        category: 'Girls',
+        price: 899,
+        stock: 10,
+        sizes: ['3-4Y'],
+        colors: ['Pink', 'Blue'],
+        colorImages: [
+          { color: 'Pink', images: ['/assets/products/girl-01.jpg', '/assets/products/girl-02.jpg'] },
+          { color: 'Blue', images: ['/assets/products/girl-03.jpg'] },
+        ]
+      }
+    })
+    assert.equal(res.status, 201)
+    const product = res.body.data.product
+    assert.equal(product.colorImages.length, 2)
+    assert.equal(product.colorImages[0].color, 'Pink')
+    assert.deepEqual(product.colorImages[0].images, ['/assets/products/girl-01.jpg', '/assets/products/girl-02.jpg'])
+    assert.equal(product.colorImages[1].color, 'Blue')
+    assert.deepEqual(product.colorImages[1].images, ['/assets/products/girl-03.jpg'])
+    assert.ok(product.images.includes('/assets/products/girl-01.jpg'))
+    assert.ok(product.images.includes('/assets/products/girl-03.jpg'))
+
+    const updated = await request(`/products/${product.id}`, {
+      method: 'PUT',
+      cookie: adminCookie,
+      body: {
+        colorImages: [
+          { color: 'Pink', images: ['/assets/products/girl-05.jpg'] },
+          { color: 'Blue', images: ['/assets/products/girl-04.jpg'] }
+        ]
+      }
+    })
+    assert.equal(updated.status, 200)
+    assert.equal(updated.body.data.product.colorImages[0].images[0], '/assets/products/girl-05.jpg')
+    await request(`/products/${product.id}`, { method: 'DELETE', cookie: adminCookie })
   })
 
   await t.test('product creation rejects malformed stock and boolean fields', async () => {
@@ -443,6 +505,177 @@ test('API integration: catalog, auth, cart, wishlist, checkout, admin, and conta
     const limited = await fetch(`${limitedBase}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'bad', password: '' }) })
     assert.equal(limited.status, 429)
     assert.equal((await limited.json()).error.code, 'AUTH_RATE_LIMITED')
+  })
+
+  await t.test('razorpay config, order creation, verification, failure rollback, and webhooks work', async (t) => {
+    const disabledConfig = await request('/payment/razorpay/config')
+    assert.equal(disabledConfig.status, 200)
+    assert.equal(disabledConfig.body.data.enabled, false)
+
+    await request('/cart', { method: 'DELETE', cookie: userCookie })
+    assert.equal((await request('/cart', { method: 'POST', cookie: userCookie, body: { productId: 'g1', size: '4-5Y', color: 'Rose', quantity: 1 } })).status, 201)
+    const unavailable = await request('/orders', {
+      method: 'POST',
+      cookie: userCookie,
+      headers: { 'Idempotency-Key': 'rzp-unconfigured-0001' },
+      body: { name: 'Aarav Sharma', email: 'checkout@aarav.test', phone: '+91 98765 43210', paymentMethod: 'razorpay', address: { fullName: 'Aarav Sharma', line1: '12 Little Street', city: 'Darbhanga', postalCode: '846001' } },
+    })
+    assert.equal(unavailable.status, 503)
+    assert.equal(unavailable.body.error.code, 'RAZORPAY_UNAVAILABLE')
+    assert.equal((await request('/cart', { cookie: userCookie })).body.data.items.length, 1)
+
+    let createdCount = 0
+    const rzpKeyId = 'rzp_test_1234567890'
+    const rzpKeySecret = 'rzp_secret_for_integration_test'
+    const rzpWebhookSecret = 'rzp_webhook_secret_for_test'
+    const rzpApp = createApp({
+      config: { ...config, rateLimitMax: 1000, razorpayKeyId: rzpKeyId, razorpayKeySecret: rzpKeySecret, razorpayWebhookSecret: rzpWebhookSecret },
+      razorpay: {
+        orders: {
+          create: async (payload) => {
+            createdCount++
+            return { id: `order_rzp_${createdCount}`, entity: 'order', amount: payload.amount, currency: payload.currency, receipt: payload.receipt, status: 'created' }
+          },
+        },
+      },
+    })
+    const rzpServer = rzpApp.listen(0, '127.0.0.1')
+    await new Promise((resolve) => rzpServer.once('listening', resolve))
+    t.after(async () => new Promise((resolve) => rzpServer.close(resolve)))
+    const rzpBase = `http://127.0.0.1:${rzpServer.address().port}/api`
+    const rzpRequest = async (path, { method = 'GET', body, cookie = '', headers = {}, rawBody } = {}) => {
+      const response = await fetch(`${rzpBase}${path}`, {
+        method,
+        headers: { ...((body === undefined && rawBody === undefined) ? {} : { 'Content-Type': 'application/json' }), ...(cookie ? { Cookie: cookie } : {}), ...headers },
+        body: rawBody !== undefined ? rawBody : body === undefined ? undefined : JSON.stringify(body),
+      })
+      return { status: response.status, body: await response.json() }
+    }
+
+    const enabledConfig = await rzpRequest('/payment/razorpay/config')
+    assert.equal(enabledConfig.status, 200)
+    assert.equal(enabledConfig.body.data.enabled, true)
+    assert.equal(enabledConfig.body.data.keyId, rzpKeyId)
+
+    const stockBefore = (await Product.findById(product._id).lean()).stock
+    const rzpOrderRes = await rzpRequest('/orders', {
+      method: 'POST',
+      cookie: userCookie,
+      headers: { 'Idempotency-Key': 'rzp-order-create-0001' },
+      body: { name: 'Aarav Sharma', email: 'checkout@aarav.test', phone: '+91 98765 43210', paymentMethod: 'razorpay', address: { fullName: 'Aarav Sharma', line1: '12 Little Street', city: 'Darbhanga', postalCode: '846001' } },
+    })
+    assert.equal(rzpOrderRes.status, 201, JSON.stringify(rzpOrderRes.body))
+    assert.equal(rzpOrderRes.body.data.razorpayOrder.id, 'order_rzp_1')
+    assert.equal(rzpOrderRes.body.data.razorpayOrder.amount, 109800)
+    assert.equal(rzpOrderRes.body.data.razorpayKeyId, rzpKeyId)
+    assert.equal(rzpOrderRes.body.data.order.paymentStatus, 'pending')
+    assert.equal((await rzpRequest('/cart', { cookie: userCookie })).body.data.items.length, 1)
+
+    const replayRzp = await rzpRequest('/orders', {
+      method: 'POST',
+      cookie: userCookie,
+      headers: { 'Idempotency-Key': 'rzp-order-create-0001' },
+      body: {},
+    })
+    assert.equal(replayRzp.status, 200)
+    assert.equal(replayRzp.body.data.reused, true)
+    assert.equal(replayRzp.body.data.razorpayOrder.id, 'order_rzp_1')
+    assert.equal(createdCount, 1)
+
+    const rzpPaymentId = 'pay_rzp_test_0001'
+    const validSignature = crypto.createHmac('sha256', rzpKeySecret).update(`order_rzp_1|${rzpPaymentId}`).digest('hex')
+    const wrongUserVerify = await rzpRequest('/payment/razorpay/verify', {
+      method: 'POST',
+      cookie: secondUserCookie,
+      body: { razorpay_order_id: 'order_rzp_1', razorpay_payment_id: rzpPaymentId, razorpay_signature: validSignature },
+    })
+    assert.equal(wrongUserVerify.status, 403)
+    const badSigVerify = await rzpRequest('/payment/razorpay/verify', {
+      method: 'POST',
+      cookie: userCookie,
+      body: { razorpay_order_id: 'order_rzp_1', razorpay_payment_id: rzpPaymentId, razorpay_signature: 'deadbeef1234' },
+    })
+    assert.equal(badSigVerify.status, 400)
+    assert.equal(badSigVerify.body.error.code, 'PAYMENT_FAILED')
+
+    const verified = await rzpRequest('/payment/razorpay/verify', {
+      method: 'POST',
+      cookie: userCookie,
+      body: { razorpay_order_id: 'order_rzp_1', razorpay_payment_id: rzpPaymentId, razorpay_signature: validSignature },
+    })
+    assert.equal(verified.status, 200, JSON.stringify(verified.body))
+    assert.equal(verified.body.data.verified, true)
+    assert.equal(verified.body.data.order.paymentStatus, 'paid')
+    assert.equal(verified.body.data.order.razorpayPaymentId, rzpPaymentId)
+    assert.ok(verified.body.data.order.paidAt)
+    assert.equal((await rzpRequest('/cart', { cookie: userCookie })).body.data.items.length, 0)
+
+    const idempotentVerify = await rzpRequest('/payment/razorpay/verify', {
+      method: 'POST',
+      cookie: userCookie,
+      body: { razorpay_order_id: 'order_rzp_1', razorpay_payment_id: rzpPaymentId, razorpay_signature: validSignature },
+    })
+    assert.equal(idempotentVerify.status, 200)
+    assert.equal(idempotentVerify.body.data.order.paymentStatus, 'paid')
+
+    assert.equal((await rzpRequest('/cart', { method: 'POST', cookie: userCookie, body: { productId: 'g1', size: '4-5Y', color: 'Rose', quantity: 1 } })).status, 201)
+    const cancelTestOrder = await rzpRequest('/orders', {
+      method: 'POST',
+      cookie: userCookie,
+      headers: { 'Idempotency-Key': 'rzp-order-cancel-0002' },
+      body: { name: 'Aarav Sharma', email: 'checkout@aarav.test', phone: '+91 98765 43210', paymentMethod: 'razorpay', address: { fullName: 'Aarav Sharma', line1: '12 Little Street', city: 'Darbhanga', postalCode: '846001' } },
+    })
+    assert.equal(cancelTestOrder.status, 201)
+    assert.equal(cancelTestOrder.body.data.razorpayOrder.id, 'order_rzp_2')
+    const failedRes = await rzpRequest('/payment/razorpay/failure', {
+      method: 'POST',
+      cookie: userCookie,
+      body: { razorpay_order_id: 'order_rzp_2', reason: 'Payment cancelled by customer' },
+    })
+    assert.equal(failedRes.status, 200)
+    assert.equal(failedRes.body.data.cancelled, true)
+    assert.equal(failedRes.body.data.order.paymentStatus, 'failed')
+    assert.equal(failedRes.body.data.order.orderStatus, 'cancelled')
+    assert.equal((await Product.findById(product._id).lean()).stock, stockBefore - 1)
+    assert.equal((await rzpRequest('/cart', { cookie: userCookie })).body.data.items.length, 1)
+
+    const webhookTestOrder = await rzpRequest('/orders', {
+      method: 'POST',
+      cookie: userCookie,
+      headers: { 'Idempotency-Key': 'rzp-order-webhook-0003' },
+      body: { name: 'Aarav Sharma', email: 'checkout@aarav.test', phone: '+91 98765 43210', paymentMethod: 'razorpay', address: { fullName: 'Aarav Sharma', line1: '12 Little Street', city: 'Darbhanga', postalCode: '846001' } },
+    })
+    assert.equal(webhookTestOrder.status, 201)
+    assert.equal(webhookTestOrder.body.data.razorpayOrder.id, 'order_rzp_3')
+    const failedWebhookPayload = JSON.stringify({ event: 'payment.failed', payload: { payment: { entity: { id: 'pay_rzp_fail_0003', order_id: 'order_rzp_3', error_description: 'Card declined' } } } })
+    const failedWebhookSignature = crypto.createHmac('sha256', rzpWebhookSecret).update(failedWebhookPayload).digest('hex')
+    const failedWebhookRes = await rzpRequest('/payment/razorpay/webhook', {
+      method: 'POST',
+      rawBody: failedWebhookPayload,
+      headers: { 'x-razorpay-signature': failedWebhookSignature },
+    })
+    assert.equal(failedWebhookRes.status, 200)
+    assert.equal((await Order.findOne({ razorpayOrderId: 'order_rzp_3' }).lean()).paymentStatus, 'failed')
+
+    const webhookPayload = JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: { id: 'pay_rzp_webhook_0003', order_id: 'order_rzp_3' } } } })
+    const badWebhook = await rzpRequest('/payment/razorpay/webhook', {
+      method: 'POST',
+      rawBody: webhookPayload,
+      headers: { 'x-razorpay-signature': 'invalid_sig' },
+    })
+    assert.equal(badWebhook.status, 400)
+    const webhookSignature = crypto.createHmac('sha256', rzpWebhookSecret).update(webhookPayload).digest('hex')
+    const goodWebhook = await rzpRequest('/payment/razorpay/webhook', {
+      method: 'POST',
+      rawBody: webhookPayload,
+      headers: { 'x-razorpay-signature': webhookSignature },
+    })
+    assert.equal(goodWebhook.status, 200)
+    assert.equal(goodWebhook.body.data.received, true)
+    const webhookUpdatedOrder = await Order.findOne({ razorpayOrderId: 'order_rzp_3' }).lean()
+    assert.equal(webhookUpdatedOrder.paymentStatus, 'paid')
+    assert.equal(webhookUpdatedOrder.razorpayPaymentId, 'pay_rzp_webhook_0003')
+    assert.equal((await rzpRequest('/cart', { cookie: userCookie })).body.data.items.length, 0)
   })
 
   await t.test('logout clears the session cookie and signed-out requests are unauthorized', async () => {

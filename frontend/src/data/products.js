@@ -22,11 +22,31 @@ const descriptions = [
 export const products = names.flatMap((list, groupIndex) => list.map((name, itemIndex) => {
   const id = `${['g','b','baby'][groupIndex]}${itemIndex + 1}`
   const price = [899, 1199, 999, 799, 1599, 1099, 1299, 1399][itemIndex]
+  const grpColors = groups[groupIndex].colors
+  const colorImages = groupIndex === 0
+    ? [
+        { color: grpColors[0], images: [`/assets/products/${productImages[0][itemIndex]}.jpg`, '/assets/products/girl-04.jpg'] },
+        { color: grpColors[1], images: ['/assets/products/girl-02.jpg', '/assets/products/girl-05.jpg'] },
+        { color: grpColors[2], images: ['/assets/products/girl-03.jpg'] }
+      ]
+    : groupIndex === 1
+    ? [
+        { color: grpColors[0], images: [`/assets/products/${productImages[1][itemIndex]}.jpg`] },
+        { color: grpColors[1], images: ['/assets/products/boy-02.jpg'] },
+        { color: grpColors[2], images: ['/assets/products/boy-03.jpg'] }
+      ]
+    : [
+        { color: grpColors[0], images: [`/assets/products/${productImages[2][itemIndex]}.jpg`] },
+        { color: grpColors[1], images: ['/assets/products/baby-02.jpg'] },
+        { color: grpColors[2], images: ['/assets/products/baby-03.jpg'] }
+      ]
+  const allImages = [...new Set(colorImages.flatMap((c) => c.images))]
   const product = {
     id, name, description: descriptions[groupIndex], ...groups[groupIndex],
     price, originalPrice: Math.round(price * (itemIndex % 3 === 0 ? 1.25 : 1.18)),
     discount: itemIndex % 3 === 0 ? 20 : 15,
-    images: [`/assets/products/${productImages[groupIndex][itemIndex]}.jpg`],
+    images: allImages,
+    colorImages,
     sizes: groups[groupIndex].sizes, colors: groups[groupIndex].colors,
     ageRange: groups[groupIndex].ages, occasion: groups[groupIndex].occasions,
     material: groupIndex === 2 ? '100% gentle cotton' : 'Soft cotton blend',
