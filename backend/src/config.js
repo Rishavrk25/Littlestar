@@ -2,8 +2,14 @@ import dotenv from 'dotenv'
 dotenv.config()
 
 export function getConfig(env = process.env) {
-  const origins = (env.CORS_ORIGINS || env.CLIENT_URL || 'http://localhost:5173,http://localhost:5174' || 'https://littlestar-backend.onrender.com')
-    .split(',').map((value) => value.trim()).filter(Boolean)
+  const isProduction = env.NODE_ENV === 'production'
+  const rawOrigins = env.CORS_ORIGINS || env.CLIENT_URL || 'http://localhost:5173,http://localhost:5174,https://littlestar-2hae.onrender.com'
+  const origins = rawOrigins
+    .split(',')
+    .map((value) => value.trim().replace(/\/+$/, ''))
+    .filter(Boolean)
+  const cookieSameSite = env.COOKIE_SAME_SITE || (isProduction ? 'none' : 'lax')
+  const cookieSecure = env.COOKIE_SECURE !== undefined ? env.COOKIE_SECURE === 'true' : (isProduction || cookieSameSite === 'none')
   return {
     nodeEnv: env.NODE_ENV || 'development',
     port: Number(env.PORT || 5000),
@@ -11,8 +17,8 @@ export function getConfig(env = process.env) {
     jwtSecret: env.JWT_SECRET || '',
     jwtExpiresIn: env.JWT_EXPIRES_IN || '7d',
     origins,
-    cookieSecure: env.COOKIE_SECURE === 'true' || env.NODE_ENV === 'production',
-    cookieSameSite: env.COOKIE_SAME_SITE || 'lax',
+    cookieSecure,
+    cookieSameSite,
     adminEmail: (env.ADMIN_EMAIL || '').trim().toLowerCase(),
     adminPassword: env.ADMIN_PASSWORD || '',
     adminName: env.ADMIN_NAME || 'Little Star Admin',

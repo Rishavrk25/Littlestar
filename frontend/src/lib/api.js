@@ -10,9 +10,35 @@ export class ApiError extends Error {
   constructor(message, status = 0, code = 'NETWORK_ERROR') { super(message); this.name = 'ApiError'; this.status = status; this.code = code }
 }
 
+export function getStoredToken() {
+  try { return localStorage.getItem('ls_token') || '' } catch { return '' }
+}
+export function setStoredToken(token) {
+  try {
+    if (token) localStorage.setItem('ls_token', token)
+    else localStorage.removeItem('ls_token')
+  } catch {}
+}
+
+export function getStoredGuestId() {
+  try {
+    let id = localStorage.getItem('ls_guest_id')
+    if (!id || !/^[a-f0-9-]{36}$/i.test(id)) {
+      id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ''
+      if (id) localStorage.setItem('ls_guest_id', id)
+    }
+    return id
+  } catch { return '' }
+}
+
 export async function api(path, options = {}) {
   const headers = new Headers(options.headers || {})
   if (options.body !== undefined && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json')
+  const token = getStoredToken()
+  if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
+  const guestId = getStoredGuestId()
+  if (guestId && !headers.has('X-Guest-Id')) headers.set('X-Guest-Id', guestId)
+
   const response = await fetch(`${API_BASE}${path.startsWith('/') ? path : `/${path}`}`, {
     ...options,
     headers,

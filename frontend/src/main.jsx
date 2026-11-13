@@ -8,7 +8,7 @@ import {
   ShoppingBag, SlidersHorizontal, Sparkles, Star, Trash2, Truck, UserRound, Users, X,
 } from 'lucide-react'
 import { moods, imageUrl } from './data/products'
-import { api, mediaUrl, productList } from './lib/api'
+import { api, mediaUrl, productList, setStoredToken } from './lib/api'
 import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google'
 import './styles.css'
 import './admin-premium.css'
@@ -80,6 +80,7 @@ function StoreProvider({ children }) {
   const login = useCallback(async (payload, register = false) => {
     const result = await api(`/auth/${register ? 'register' : 'login'}`, { method: 'POST', body: payload })
     if (result.user?.role === 'admin') throw new Error('Admin accounts cannot be used in the storefront.')
+    if (result.token) setStoredToken(result.token)
     dispatch({ type: 'login', user: result.user })
     await refreshCart()
     return result.user
@@ -87,12 +88,14 @@ function StoreProvider({ children }) {
   const googleLogin = useCallback(async (token) => {
     const result = await api(`/auth/google`, { method: 'POST', body: { token } })
     if (result.user?.role === 'admin') throw new Error('Admin accounts cannot be used in the storefront.')
+    if (result.token) setStoredToken(result.token)
     dispatch({ type: 'login', user: result.user })
     await refreshCart()
     return result.user
   }, [refreshCart])
   const logout = useCallback(async () => {
-    await api('/auth/logout', { method: 'POST' })
+    try { await api('/auth/logout', { method: 'POST' }) } catch {}
+    setStoredToken('')
     dispatch({ type: 'logout' })
     await refreshCart()
   }, [refreshCart])

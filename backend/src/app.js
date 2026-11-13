@@ -87,7 +87,7 @@ function setGuestCookie(res, id, config) {
   res.cookie(guestCookieName, id, { httpOnly: true, secure: config.cookieSecure, sameSite: config.cookieSameSite, path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 })
 }
 function getGuest(req, res, config) {
-  let guestId = req.cookies?.[guestCookieName]
+  let guestId = req.cookies?.[guestCookieName] || req.get('X-Guest-Id')
   if (!guestId || !/^[a-f0-9-]{36}$/i.test(guestId)) {
     guestId = crypto.randomUUID()
     setGuestCookie(res, guestId, config)
@@ -252,12 +252,40 @@ async function addCartItem(query, product, size, color, quantity, availableStock
   throw fail(409, 'The cart changed while this item was being added. Please try again.', 'CART_CHANGED')
 }
 
+export function isAllowedOrigin(origin, configuredOrigins = []) {
+  if (!origin) return true
+  const normalized = origin.trim().toLowerCase().replace(/\/+$/, '')
+  for (const configured of configuredOrigins) {
+    const clean = configured.trim().toLowerCase().replace(/\/+$/, '')
+    if (clean === '*' || clean === normalized) return true
+    if (clean.startsWith('*.') && normalized.endsWith(clean.slice(1))) return true
+  }
+  try {
+    const parsed = new URL(normalized)
+    const hostname = parsed.hostname.toLowerCase()
+    if (hostname === 'localhost' || hostname === '127.0.0.1') return true
+    if (hostname.endsWith('.onrender.com')) return true
+  } catch {
+    return false
+  }
+  return false
+}
+
 export function createApp(options = {}) {
   const config = options.config || getConfig()
   const app = express()
   app.disable('x-powered-by')
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
-  app.use(cors({ origin(origin, callback) { if (!origin || config.origins.includes(origin)) return callback(null, true); return callback(fail(403, 'This origin is not allowed.', 'CORS_ORIGIN_DENIED')) }, credentials: true, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'] }))
+  app.use(cors({
+    origin(origin, callback) {
+      if (isAllowedOrigin(origin, config.origins)) return callback(null, true)
+      return callback(fail(403, 'This origin is not allowed.', 'CORS_ORIGIN_DENIED'))
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-App-Role', 'X-Guest-Id'],
+    exposedHeaders: ['Set-Cookie'],
+  }))
   app.use('/uploads', express.static(uploadDirectory, { dotfiles: 'deny', fallthrough: false, immutable: true, index: false, maxAge: '1y' }))
   app.use(express.json({
     limit: '64kb',
@@ -337,7 +365,7 @@ export function createApp(options = {}) {
     const token = jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, { expiresIn: config.jwtExpiresIn, issuer: 'little-star-kids-wear', audience: 'little-star-client' })
     setAuthCookie(req, res, token, config)
     await mergeGuestState(req, res, config, user)
-    return envelope(res, { user: user.toJSON() }, 201)
+    return envelope(res, { user: user.toJSON(), token }, 201)
   })
   api.post('/auth/google', authLimit, async (req, res) => {
     const { token } = req.body
@@ -378,7 +406,7 @@ export function createApp(options = {}) {
     const jwtToken = jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, { expiresIn: config.jwtExpiresIn, issuer: 'little-star-kids-wear', audience: 'little-star-client' })
     setAuthCookie(req, res, jwtToken, config)
     await mergeGuestState(req, res, config, user)
-    return envelope(res, { user: user.toJSON() }, 200)
+    return envelope(res, { user: user.toJSON(), token: jwtToken }, 200)
   })
   api.post('/auth/login', authLimit, async (req, res) => {
     const email = requestText(req.body.email, 'Email', { max: 254, required: true }).toLowerCase()
@@ -390,9 +418,10 @@ export function createApp(options = {}) {
     if (!(await bcrypt.compare(password, user.passwordHash))) throw fail(401, 'Email or password is incorrect.', 'INVALID_CREDENTIALS')
     user.lastLoginAt = new Date()
     await user.save()
-    setAuthCookie(req, res, jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, { expiresIn: config.jwtExpiresIn, issuer: 'little-star-kids-wear', audience: 'little-star-client' }), config, user.role)
+    const token = jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, { expiresIn: config.jwtExpiresIn, issuer: 'little-star-kids-wear', audience: 'little-star-client' })
+    setAuthCookie(req, res, token, config, user.role)
     await mergeGuestState(req, res, config, user)
-    return envelope(res, { user: user.toJSON() })
+    return envelope(res, { user: user.toJSON(), token })
   })
 
   api.post('/auth/logout', maybeUser, async (req, res) => {
