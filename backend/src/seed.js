@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs'
 import { assertRuntimeConfig, getConfig } from './config.js'
 import { connectDatabase, disconnectDatabase } from './db.js'
 import { Category, Product, User } from './models.js'
-import { products } from '../../frontend/src/data/products.js'
+import { products } from './data/products.js'
 
 const config = getConfig()
 assertRuntimeConfig(config)
