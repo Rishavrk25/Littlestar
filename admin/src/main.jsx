@@ -8,7 +8,7 @@ import {
   ShoppingBag, SlidersHorizontal, Sparkles, Star, Trash2, Truck, UserRound, Users, X,
 } from 'lucide-react'
 import { moods, imageUrl } from './data/products'
-import { api, mediaUrl, productList } from './lib/api'
+import { api, mediaUrl, productList, setStoredAdminToken } from './lib/api'
 import './styles.css'
 import './admin-premium.css'
 
@@ -73,12 +73,14 @@ function StoreProvider({ children }) {
   }, [setCartFromServer, state.cart, state.wishlist])
   const login = useCallback(async (payload, register = false) => {
     const result = await api(`/auth/${register ? 'register' : 'login'}`, { method: 'POST', body: payload })
+    if (result.token) setStoredAdminToken(result.token)
     dispatch({ type: 'login', user: result.user })
     await refreshCart()
     return result.user
   }, [refreshCart])
   const logout = useCallback(async () => {
-    await api('/auth/logout', { method: 'POST' })
+    try { await api('/auth/logout', { method: 'POST' }) } catch {}
+    setStoredAdminToken('')
     dispatch({ type: 'logout' })
     await refreshCart()
   }, [refreshCart])
