@@ -2,7 +2,7 @@ import dotenv from 'dotenv'
 dotenv.config()
 
 export function getConfig(env = process.env) {
-  const origins = (env.CORS_ORIGINS || env.CLIENT_URL || 'http://localhost:5173,http://localhost:5174')
+  const origins = (env.CORS_ORIGINS || env.CLIENT_URL || 'http://localhost:5173,http://localhost:5174' || 'https://littlestar-backend.onrender.com')
     .split(',').map((value) => value.trim()).filter(Boolean)
   return {
     nodeEnv: env.NODE_ENV || 'development',
