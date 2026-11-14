@@ -28,27 +28,33 @@ export async function ensureBootstrap(config) {
       console.info(`Auto-seeded ${products.length} catalog products.`)
     }
 
-    const adminPassword = config.adminPassword || 'admin123admin'
-    const passwordHash = await bcrypt.hash(adminPassword, 12)
     const adminTargets = new Set([
       'admin@gmail.com',
       ...(config.adminEmail ? [config.adminEmail.toLowerCase()] : [])
     ])
     for (const email of adminTargets) {
-      await User.updateOne(
-        { email },
-        {
-          $set: {
-            name: config.adminName || 'Little Star Admin',
-            email,
-            passwordHash,
-            role: 'admin',
-            isActive: true,
-            authProvider: 'local'
-          }
-        },
-        { upsert: true }
-      )
+      const existing = await User.findOne({ email }).select('+passwordHash')
+      if (!existing) {
+        const passwordHash = await bcrypt.hash(config.adminPassword || 'admin123admin', 12)
+        await User.create({
+          name: config.adminName || 'Little Star Admin',
+          email,
+          passwordHash,
+          role: 'admin',
+          isActive: true,
+          authProvider: 'local'
+        })
+      } else {
+        const matchesCurrent = config.adminPassword ? await bcrypt.compare(config.adminPassword, existing.passwordHash || '') : false
+        const matchesDefault = await bcrypt.compare('admin123admin', existing.passwordHash || '')
+        if (!matchesCurrent && !matchesDefault) {
+          existing.passwordHash = await bcrypt.hash(config.adminPassword || 'admin123admin', 12)
+        }
+        existing.role = 'admin'
+        existing.isActive = true
+        existing.authProvider = 'local'
+        await existing.save()
+      }
       console.info(`Admin user ensured: ${email}`)
     }
   } catch (err) {
